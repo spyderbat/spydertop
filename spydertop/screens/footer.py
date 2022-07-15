@@ -2,7 +2,7 @@
 # footer.py
 #
 # Author: Griffith Thomas
-# Copyright 2022 Spyderbat, Inc.  All rights reserved.
+# Copyright 2022 Spyderbat, Inc. All rights reserved.
 #
 
 """
@@ -16,6 +16,9 @@ from asciimatics.widgets import Button, Layout, Frame, Widget
 
 
 class Footer(Layout):
+    """A footer class to handle the creation and resetting of the buttons widgets
+    as well as click handlers."""
+
     _buttons: List = []
     _on_clicks: List = []
     _end_widget: Widget = None
@@ -35,6 +38,7 @@ class Footer(Layout):
         self.set_buttons(buttons, end_widget)
 
     def set_buttons(self, buttons, end_widget=None):
+        """Set the buttons to be displayed in the footer."""
         self.clear_widgets()
         self._buttons = []
         self._on_clicks = []
@@ -53,7 +57,9 @@ class Footer(Layout):
         self.add_widget(self._end_widget, column=10)
 
     def click(self, index):
+        """Trigger a click event on the button at the given index."""
         self._on_clicks[index]()
 
     def change_button_text(self, index, new_text):
+        """Change the text of the button at the given index."""
         self._buttons[index].text = new_text

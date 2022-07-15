@@ -2,7 +2,7 @@
 # columns.py
 #
 # Author: Griffith Thomas
-# Copyright 2022 Spyderbat, Inc.  All rights reserved.
+# Copyright 2022 Spyderbat, Inc. All rights reserved.
 #
 
 """
@@ -33,7 +33,9 @@ from spydertop.utils import pretty_address, pretty_bytes, pretty_time, PAGE_SIZE
 # the process is a thread, or if no information is found
 
 
-def get_cpu_per(m, pr, r, p):
+# pylint: disable=invalid-name
+def get_cpu_per(m, pr, r, _p):
+    """Formats the percentage of CPU time used by the process"""
     if r is None:
         return None
     time_delta = m.time_elapsed
@@ -45,7 +47,8 @@ def get_cpu_per(m, pr, r, p):
     return cpu
 
 
-def get_mem_per(m, pr, r, p):
+def get_mem_per(m, _pr, r, _p):
+    """Formats the percentage of memory used by the process"""
     if r is None:
         return None
     mem = r["rss"] * PAGE_SIZE
@@ -58,7 +61,8 @@ def get_mem_per(m, pr, r, p):
     return mem
 
 
-def get_time_plus(m, pr, r, p):
+def get_time_plus(m, _pr, r, _p):
+    """Formats the time spent in the process"""
     if r is None:
         return None
     clk_tck = m.get_value("clk_tck")
@@ -67,7 +71,8 @@ def get_time_plus(m, pr, r, p):
     return pretty_time(time)
 
 
-def get_time_plus_value(m, pr, r, p):
+def get_time_plus_value(m, _pr, r, _p):
+    """Returns the time spent in the process"""
     if r is None:
         return None
     clk_tck = m.get_value("clk_tck")
@@ -76,10 +81,11 @@ def get_time_plus_value(m, pr, r, p):
     return time
 
 
-def color_cmd(m, pr, r, p):
+def color_cmd(_m, _pr, _r, p):
+    """Formats the command for the process"""
     base = f'{" ".join(p["args"])}'
     color = ""
-    if p["thread"] == True:
+    if p["thread"] is True:
         color = "${2}"
     if p["type"] == "kernel thread":
         color = "${8,1}"
@@ -114,7 +120,7 @@ PROCESS_COLUMNS = [
     ),
     (
         "PRI",
-        lambda m, pr, r, p: int(r["priority"]) if r else "",
+        lambda m, pr, r, p: int(r["priority"]) if r else "${8,1}?",
         ">",
         3,
         lambda m, pr, r, p: int(r["priority"]) if r else None,
@@ -126,7 +132,7 @@ PROCESS_COLUMNS = [
             int(r["nice"]) if r["nice"] >= 0 else f'${{1}}{int(r["nice"])}'
         )
         if r
-        else "",
+        else "${8,1}?",
         ">",
         3,
         lambda m, pr, r, p: int(r["nice"]) if r else None,
@@ -160,7 +166,7 @@ PROCESS_COLUMNS = [
         "S",
         lambda m, pr, r, p: ("${8,1}" + r["state"] if r["state"] != "R" else "${2}R")
         if r
-        else "",
+        else "${8,1}?",
         "^",
         1,
         lambda m, pr, r, p: r["state"] if r else None,
@@ -169,6 +175,30 @@ PROCESS_COLUMNS = [
     ("CPU%", get_cpu_per, ">", 4, get_cpu_per, True),
     ("MEM%", get_mem_per, ">", 4, get_mem_per, True),
     ("TIME+", get_time_plus, ">", 9, get_time_plus_value, True),
+    (
+        "ELAPSED",
+        lambda m, pr, r, p: pretty_time(m.timestamp - p["valid_from"]),
+        ">",
+        9,
+        lambda m, pr, r, p: m.timestamp - p["valid_from"],
+        False,
+    ),
+    (
+        "CGROUP",
+        lambda m, pr, r, p: p.get("cgroup", None) or "",
+        "<",
+        30,
+        lambda m, pr, r, p: p["cgroup"] if "cgroup" in p else None,
+        False,
+    ),
+    (
+        "CONTAINER",
+        lambda m, pr, r, p: p.get("container", None) or "${8,1}N/A",
+        ">",
+        9,
+        lambda m, pr, r, p: p["container"] if "container" in p else None,
+        False,
+    ),
     ("Command", color_cmd, "<", 0, lambda m, pr, r, p: f'{" ".join(p["args"])}', True),
 ]
 
@@ -234,7 +264,7 @@ SESSION_COLUMNS = [
         lambda m, s: s["interactive"],
         True,
     ),
-    ("MUID", lambda m, s: s["muid"], "<", 20, lambda m, s: s["muid"], True),
+    ("MUID", lambda m, s: s["muid"], "<", 20, lambda m, s: s["muid"], False),
     ("SESSPATH", lambda m, s: s["spath"], "<", 0, lambda m, s: s["spath"], True),
 ]
 
@@ -256,7 +286,7 @@ CONNECTION_COLUMNS = [
         lambda m, c: datetime.fromtimestamp(c["valid_to"]) if "valid_to" in c else None,
         "<",
         27,
-        lambda m, c: c["valid_to"] if "valid_to" in c else None,
+        lambda m, c: c.get("valid_to", None),
         False,
     ),
     (
@@ -266,9 +296,7 @@ CONNECTION_COLUMNS = [
         else pretty_time(c["duration"]),
         "<",
         9,
-        lambda m, c: c["duration"]
-        if "duration" in c
-        else m.timestamp - c["valid_from"],
+        lambda m, c: c.get("duration", m.timestamp - c["valid_from"]),
         True,
     ),
     (
@@ -324,7 +352,8 @@ CONNECTION_COLUMNS = [
 ########################### Flags ###########################
 
 
-def color_severity(m, f):
+def color_severity(_m, f):
+    """Format the severity of a flag."""
     severity = f["severity"]
     if severity == "info":
         return "${8}I"
@@ -355,7 +384,7 @@ FLAG_COLUMNS = [
         lambda m, f: pretty_time(m.timestamp - f["time"]),
         ">",
         9,
-        lambda m, f: f["time"],
+        lambda m, f: m.timestamp - f["time"],
         True,
     ),
     (
@@ -398,9 +427,7 @@ LISTENING_SOCKET_COLUMNS = [
         else pretty_time(l["duration"]),
         "<",
         9,
-        lambda m, l: l["duration"]
-        if "duration" in l
-        else m.timestamp - l["valid_from"],
+        lambda m, l: l.get("duration", m.timestamp - l["valid_from"]),
         True,
     ),
     (

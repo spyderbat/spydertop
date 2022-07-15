@@ -2,7 +2,7 @@
 # loading.py
 #
 # Author: Griffith Thomas
-# Copyright 2022 Spyderbat, Inc.  All rights reserved.
+# Copyright 2022 Spyderbat, Inc. All rights reserved.
 #
 
 """
@@ -19,6 +19,8 @@ from spydertop.widgets import Padding, FuncLabel
 
 
 class LoadingFrame(Frame):
+    """A class for the loading screen"""
+
     _model: AppModel
     _label: Label
 
@@ -40,7 +42,12 @@ class LoadingFrame(Frame):
         self._label = Label("", align="^")
         layout.add_widget(self._label)
         layout.add_widget(
-            FuncLabel(lambda: "Loading time " + str(model.time), align="^")
+            FuncLabel(
+                lambda: "Loading time " + str(model.time)
+                if model.time is not None
+                else "Loading ... ",
+                align="^",
+            )
         )
         layout.add_widget(FuncLabel(lambda: model.state, align="^"))
 
@@ -59,7 +66,7 @@ class LoadingFrame(Frame):
             self._quit()
         else:
             # update the label
-            max_bars = int(self._label._w / 3)
+            max_bars = int(self.screen.width / 3)
             bars = int(self._model.progress * max_bars)
             self._label.text = (
                 "Loading: ["

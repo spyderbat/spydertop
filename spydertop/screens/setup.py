@@ -2,7 +2,7 @@
 # setup.py
 #
 # Author: Griffith Thomas
-# Copyright 2022 Spyderbat, Inc.  All rights reserved.
+# Copyright 2022 Spyderbat, Inc. All rights reserved.
 #
 
 """
@@ -46,6 +46,8 @@ from spydertop.model import AppModel
 
 
 def change_columns(columns, name):
+    """Create a lambda to enable/disable a column"""
+
     def inner(enabled, model):
         for i, col in enumerate(columns):
             if col[0] == name:
@@ -57,6 +59,8 @@ def change_columns(columns, name):
 
 
 def set_config(name):
+    """Create a lambda to set a config value"""
+
     def inner(val, model):
         model.config[name] = val
 
@@ -64,10 +68,12 @@ def set_config(name):
 
 
 def get_enabled(columns, index):
+    """Get the enabled status of a column"""
     return lambda _: columns[index][5]
 
 
 def collapse_tree(val, model):
+    """Create a lambda to set the collapse tree value"""
     model.config["collapse_tree"] = val
     model.rebuild_tree()
 
@@ -182,11 +188,14 @@ OPTIONS = {
 
 
 class SetupFrame(Frame):
+    """The setup frame, containing a form to select the behavior of the tool."""
+
     _model: AppModel
     _disable_change: bool
     _layout: Layout
     _main_column: ListBox
     _second_column: ListBox
+    _has_textbox: bool = False
 
     def __init__(self, screen: Screen, model: AppModel) -> None:
         super().__init__(
@@ -206,7 +215,7 @@ class SetupFrame(Frame):
         ## build widgets
         self._main_column = ListBox(
             10,
-            [(x, x) for x in OPTIONS.keys()],
+            [(x, x) for x in OPTIONS],
             name="setup main column",
             add_scroll_bar=True,
             on_change=self._on_change,
@@ -214,7 +223,7 @@ class SetupFrame(Frame):
 
         self._second_column = ListBox(
             10,
-            [(x, x) for x in OPTIONS["Columns"].keys()],
+            [(x, x) for x in OPTIONS["Columns"]],
             name="setup secondary column",
             add_scroll_bar=True,
             on_change=self._on_change,
@@ -228,7 +237,9 @@ class SetupFrame(Frame):
 
     def process_event(self, event):
         if isinstance(event, KeyboardEvent):
-            if event.key_code == ord("q") or event.key_code == Screen.KEY_ESCAPE:
+            if event.key_code == Screen.KEY_ESCAPE:
+                self._scene.remove_effect(self)
+            if event.key_code in {ord("q"), ord("Q")} and not self._has_textbox:
                 self._scene.remove_effect(self)
         super().process_event(event)
         if self._model.config.settings_changed:
@@ -245,24 +256,30 @@ class SetupFrame(Frame):
 
         if isinstance(values, bool):
             # make checkbox
-            checkbox = CheckBox(label)
+            checkbox = CheckBox(
+                label, on_change=lambda: on_change(checkbox.value, self._model)
+            )
             checkbox.value = default_getter(self._model) if default_getter else values
-            checkbox._on_change = lambda: on_change(checkbox.value, self._model)
             return checkbox
 
         if isinstance(values, set):
             # make radio
-            radio = RadioButtons([(x, x) for x in values], label=label)
+            radio = RadioButtons(
+                [(x, x) for x in values],
+                label=label,
+                on_change=lambda: on_change(radio.value, self._model),
+            )
             if default_getter:
                 radio.value = default_getter(self._model)
-            radio._on_change = lambda: on_change(radio.value, self._model)
             return radio
 
         if isinstance(values, str):
             # make textbox
-            textbox = Text(label=label)
+            self._has_textbox = True
+            textbox = Text(
+                label=label, on_change=lambda: on_change(textbox.value, self._model)
+            )
             textbox.value = default_getter(self._model) if default_getter else values
-            textbox._on_change = lambda: on_change(textbox.value, self._model)
             return textbox
 
         if isinstance(values, float):
@@ -274,14 +291,17 @@ class SetupFrame(Frame):
                 except ValueError:
                     return False
 
-            textbox = Text(label=label, validator=validate)
+            textbox = Text(
+                label=label,
+                validator=validate,
+                on_change=(
+                    lambda: on_change(float(textbox.value), self._model)
+                    if validate(textbox.value)
+                    else None
+                ),
+            )
             textbox.value = str(
                 default_getter(self._model) if default_getter else values
-            )
-            textbox._on_change = (
-                lambda: on_change(float(textbox.value), self._model)
-                if validate(textbox.value)
-                else None
             )
             return textbox
 
@@ -294,8 +314,10 @@ class SetupFrame(Frame):
     # selection changes
 
     def rebuild(self):
+        """Rebuild the UI based off of the current selection."""
         # prevent recursing (through another on_change call) when changing things
         self._disable_change = True
+        self._has_textbox = False
 
         # First Column
         if self._layout.get_current_widget() == self._second_column:
@@ -308,17 +330,17 @@ class SetupFrame(Frame):
         # second Column
         self._second_column.options = (
             [(x, x) for x in OPTIONS[self._main_column.value].keys()]
-            if type(OPTIONS[self._main_column.value]) == dict
+            if isinstance(OPTIONS[self._main_column.value], dict)
             else []
         )
         self._layout.add_widget(self._second_column, 1)
 
         # Main view
         widgets = OPTIONS[self._main_column.value]
-        if type(widgets) == dict:
+        if isinstance(widgets, dict):
             widgets = widgets[self._second_column.value]
-        for w in widgets:
-            self._layout.add_widget(self.make_widget(w), 2)
+        for widget in widgets:
+            self._layout.add_widget(self.make_widget(widget), 2)
 
         self.fix()
 

@@ -1,5 +1,5 @@
 default:
     api_key: API_KEY
     org: DEFAULT_ORG_ID
-    source: DEFAULT_SOURCE_ID
-    api_url: api.prod.spyderbat.com
+    machine: DEFAULT_MACHINE_ID
+    api_url: api.spyderbat.com

@@ -2,7 +2,7 @@
 # setup.py
 #
 # Author: Griffith Thomas
-# Copyright 2022 Spyderbat, Inc.  All rights reserved.
+# Copyright 2022 Spyderbat, Inc. All rights reserved.
 #
 
 """
@@ -16,7 +16,7 @@
 from setuptools import setup
 
 NAME = "spydertop"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 # To install the library, run the following
 #
 # python setup.py install
@@ -24,7 +24,7 @@ VERSION = "0.1.0"
 # prerequisite: setuptools
 # http://pypi.python.org/pypi/setuptools
 
-REQUIRES = ["asciimatics", "click", "sbapi", "pyyaml", "typing", "textwrap"]
+REQUIRES = ["asciimatics", "click", "spyderbat-api", "pyyaml"]
 
 setup(
     name=NAME,
@@ -37,11 +37,11 @@ setup(
     python_requires=">=3.6",
     install_requires=REQUIRES,
     packages=["spydertop", "spydertop.screens"],
-    py_modules="spydertop",
+    py_modules=["spydertop", "spydertop.screens"],
     include_package_data=True,
     long_description="""\
     Provides a way to view the state of a system
-    in the past, utilizing the spyderbat apis.
+    in the past, utilizing the Spyderbat apis.
     """,
     entry_points="""
     [console_scripts]

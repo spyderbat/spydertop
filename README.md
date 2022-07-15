@@ -1,19 +1,23 @@
 # Spydertop Tool
 
-Spydertop, is a tool that provides htop-like functionality for any point in time, on any of your Spyderbat sources. This allows a view of system processes and statuses at points in the past, for any of the sources in your Spyderbat ORG.
+Spydertop, is a tool that provides htop-like functionality for any point in time, on any of your Spyderbat-enabled machines. This allows you to see what happened on your server five days ago as if you were logged in and monitoring it at that moment.
 
-## Installation/Quick Start
+## Quick Start
 
-Spydertop uses the Spyderbat APIs, so it must have access to a valid API key, usually stored in a configuration file, as shown below. API keys can be obtained from the API keys page under your Spyderbat account.
+If you would like to try spydertop without installing it first, you can run the [docker image](https://hub.docker.com/r/spyderbat/spydertop). Example data from the `examples` directory is included in the docker image.
 
-```yaml
-# File: ~/.sbapi/config.yaml
-default:
-    api_key: API_KEY
-    org:     DEFAULT_ORG_ID    # optional
-    source:  DEFAULT_SOURCE_ID # optional
-    api_url: apr.prod.spyderbat.com # optional
+```sh
+# to run without arguments
+docker run -it spyderbat/spydertop
+
+# to run on an example
+docker run -it spyderbat/spydertop -i examples/minikube-sock-shop.json.gz
+
+# to persist settings, or to use a pre-configured Spyderbat API
+docker run -it -v $HOME/.spyderbat-api:/root/.spyderbat-api spyderbat/spydertop [ARGS]
 ```
+
+## Installation
 
 ### Quick Install
 
@@ -40,7 +44,7 @@ pip install .
 On your first run of `spydertop`, it will guide you through setting up a configuration if you do not have one already. If you prefer to set it up yourself, your organization id can be found in the url for the dashboard, and many other pages:
 
 ```url
-https://api.prod.spyderbat.com/app/org/{ORG_ID_HERE}/dashboard
+https://api.spyderbat.com/app/org/{ORG_ID_HERE}/dashboard
 ```
 
 Similarly, the source id can be located in the url of an investigation, or by enabling the id column in the sources list.
@@ -58,15 +62,29 @@ spydertop --help # print usage information
 
 # starts spydertop with the specified source
 # at a point in time 5 days ago
-spydertop -g ORGUID --s SOURCEUID -- -5d
+spydertop -g ORGUID -m MACHINEUID -- -5d
 
 # full example
 spydertop \
         --organization ORGUID \
-        --source SOURCEUID \
+        --machine MACHINEUID \
         --duration 3m \
         --input cached_input_records.json.gz \
         --output file_to_save_to.json.gz \
         --log-level WARN \
+        --no-confirm \
         -- 1654303663.600901
+```
+
+## Configuration
+
+Spydertop uses the Spyderbat APIs, so it must have access to a valid API key, usually stored in a configuration file, as shown below. This configuration file is automatically created the first time you run spydertop, but can be edited manually at any time. API keys can be obtained from the API keys page under your Spyderbat account.
+
+```yaml
+# File: ~/.spyderbat-api/config.yaml
+default:
+    api_key: API_KEY
+    org:     DEFAULT_ORG_ID    # optional
+    source:  DEFAULT_SOURCE_ID # optional
+    api_url: apr.prod.spyderbat.com # optional
 ```

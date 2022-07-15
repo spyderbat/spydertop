@@ -2,11 +2,11 @@
 # widgets.py
 #
 # Author: Griffith Thomas
-# Copyright 2022 Spyderbat, Inc.  All rights reserved.
+# Copyright 2022 Spyderbat, Inc. All rights reserved.
 #
 
 """
-A series of useful widgets for diplaying htop-like content, including
+A series of useful widgets for displaying htop-like content, including
 bar graphs and dynamic labels.
 """
 
@@ -16,7 +16,7 @@ from asciimatics.widgets import Widget
 from asciimatics.parsers import Parser
 from asciimatics.strings import ColouredText
 
-from spydertop.utils import header_bytes, COLOR_REGEX
+from spydertop.utils import CustomTextWrapper, header_bytes, COLOR_REGEX
 
 
 class Meter(Widget):
@@ -52,7 +52,7 @@ class Meter(Widget):
 
         self._label = label
         self._percent = percent
-        self.values = values
+        self._values = values
         self.colors = colors
         self.total = total
         self.important_value = important_value
@@ -72,9 +72,9 @@ class Meter(Widget):
           LBL[|||||||||||       VALUE]
         with padding before and after.
         """
-        PADDING_START = 2
-        PADDING_END = 1
-        LABEL_WIDTH = 3
+        padding_start = 2
+        padding_end = 1
+        label_width = 3
 
         # draw label
         (color, attr, background) = (
@@ -83,7 +83,7 @@ class Meter(Widget):
             else self._frame.palette["label"]
         )
         self._frame.canvas.paint(
-            (" " * PADDING_START) + "{:<{}}".format(self._label, LABEL_WIDTH),
+            (" " * padding_start) + f"{self._label:<{label_width}}",
             self._x,
             self._y,
             color,
@@ -98,11 +98,29 @@ class Meter(Widget):
             else self._frame.palette["border"]
         )
         self._frame.canvas.paint(
-            "[", self._x + PADDING_START + LABEL_WIDTH, self._y, color, attr, background
+            "[", self._x + padding_start + label_width, self._y, color, attr, background
         )
         self._frame.canvas.paint(
-            "]", self._x + self._w - 1 - PADDING_END, self._y, color, attr, background
+            "]", self._x + self._w - 1 - padding_end, self._y, color, attr, background
         )
+
+        color, attr, background = (
+            self._frame.palette["meter_value"]
+            if "meter_value" in self._frame.palette
+            else self._frame.palette["background"]
+        )
+        # early exit if values is empty
+        if not self._values:
+            end_label = "No data"
+            self._frame.canvas.paint(
+                end_label,
+                self._x + self._w - 1 - len(end_label) - padding_end,
+                self._y,
+                color,
+                attr,
+                background,
+            )
+            return
 
         # print end label
         if self._percent:
@@ -110,7 +128,9 @@ class Meter(Widget):
             end_label = (
                 str(
                     round(
-                        sum(self.values[: self.important_value + 1]) / self.total * 100,
+                        sum(self._values[: self.important_value + 1])
+                        / self.total
+                        * 100,
                         1,
                     )
                 )
@@ -118,15 +138,11 @@ class Meter(Widget):
             )
         else:
             # pretty print value / total
-            end_label = f"{header_bytes(sum(self.values[:self.important_value+1]))}/{header_bytes(self.total)}"
-        (color, attr, background) = (
-            self._frame.palette["meter_value"]
-            if "meter_value" in self._frame.palette
-            else self._frame.palette["background"]
-        )
+            end_label = f"\
+{header_bytes(sum(self._values[:self.important_value+1]))}/{header_bytes(self.total)}"
         self._frame.canvas.paint(
             end_label,
-            self._x + self._w - 1 - len(end_label) - PADDING_END,
+            self._x + self._w - 1 - len(end_label) - padding_end,
             self._y,
             color,
             attr,
@@ -134,13 +150,13 @@ class Meter(Widget):
         )
 
         # print bar
-        width = self._w - 2 - PADDING_START - LABEL_WIDTH - PADDING_END
+        width = self._w - 2 - padding_start - label_width - padding_end
         for character in range(width):
             chr_val = character / width * self.total
             val_sum = 0
 
             # find what color the character should be
-            for (i, value) in enumerate(self.values):
+            for (i, value) in enumerate(self._values):
                 val_sum += value
                 if chr_val < val_sum:
                     color = self.colors[i]
@@ -152,7 +168,7 @@ class Meter(Widget):
 
                     self._frame.canvas.paint(
                         letter,
-                        self._x + character + 1 + PADDING_START + LABEL_WIDTH,
+                        self._x + character + 1 + padding_start + label_width,
                         self._y,
                         color,
                         attr,
@@ -162,7 +178,16 @@ class Meter(Widget):
 
     @property
     def value(self):
-        return self.values
+        """The values of the bar graph."""
+        return self._values
+
+    @value.setter
+    def value(self, value):
+        self._values = value
+        if value is not None:
+            assert len(value) == len(self.colors)
+            assert self.important_value < len(value)
+            assert self.total is not None
 
 
 class Padding(Widget):
@@ -188,6 +213,7 @@ class Padding(Widget):
 
     @property
     def value(self):
+        """Padding has no value."""
         return None
 
 
@@ -201,9 +227,16 @@ class FuncLabel(Widget):
     align: str
     generator: Callable[[], str]
     color: str
+    indent: str
 
     def __init__(
-        self, generator: lambda: str, align="<", parser=None, name=None, color="label"
+        self,
+        generator: lambda: str,
+        align="<",
+        parser=None,
+        name=None,
+        color="label",
+        indent="",
     ):
         """
         :param generator: a function which generates the text to display on screen.
@@ -218,6 +251,7 @@ class FuncLabel(Widget):
         self.align = align
         self.parser = parser
         self.color = color
+        self.indent = indent
 
     def process_event(self, event):
         return event
@@ -226,43 +260,57 @@ class FuncLabel(Widget):
         pass
 
     def required_height(self, offset, width):
-        return len(self.generator().split("\n"))
+        text = self.generator()
+        height = 0
+        wrapper = CustomTextWrapper(width=width, subsequent_indent=self.indent)
+        for para in text.split("\n"):
+            if para == "":
+                height += 1
+                continue
+            height += len(wrapper.wrap(para))
+        return height
 
     def update(self, frame_no):
         (color, attr, background) = self._frame.palette[self.color]
         text = self.generator()
+        wrapper = CustomTextWrapper(width=self._w, subsequent_indent=self.indent)
 
-        # some hoops need to be jumped through to get the text colored
-        # properly by a parser.
-        for (i, line) in enumerate(text.split("\n")):
-            # first, the space needed to pad the text to the correct alignment
-            # is calculated.
-            extra_space = self._w - len(re.sub(COLOR_REGEX, "", line))
-            left_space = (
-                0
-                if self.align == "<"
-                else extra_space // 2
-                if self.align == "^"
-                else extra_space
-            )
-            spaces = " " * left_space
-            line = f"{spaces}{line}"
+        offset = 0
+        for para in text.split("\n"):
+            if para == "":
+                offset += 1
+                continue
+            for line in wrapper.wrap(para):
+                # first, the space needed to pad the text to the correct alignment
+                # is calculated.
+                extra_space = self._w - len(re.sub(COLOR_REGEX, "", line))
+                left_space = (
+                    0
+                    if self.align == "<"
+                    else extra_space // 2
+                    if self.align == "^"
+                    else extra_space
+                )
+                spaces = " " * left_space
+                line = f"{spaces}{line}"
 
-            # then, the text is colored if a parser is provided
-            if self.parser:
-                line = ColouredText(line, self.parser)
+                # then, the text is colored if a parser is provided
+                if self.parser:
+                    line = ColouredText(line, self.parser)
 
-            # finally, the text is drawn
-            self._frame.canvas.paint(
-                line,
-                self._x,
-                self._y + i,
-                color,
-                attr,
-                background,
-                colour_map=line.colour_map if hasattr(line, "colour_map") else None,
-            )
+                # finally, the text is drawn
+                self._frame.canvas.paint(
+                    line,
+                    self._x,
+                    self._y + offset,
+                    color,
+                    attr,
+                    background,
+                    colour_map=line.colour_map if hasattr(line, "colour_map") else None,
+                )
+                offset += 1
 
     @property
     def value(self):
+        """The text of the label."""
         return self.generator()

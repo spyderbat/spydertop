@@ -2,7 +2,7 @@
 # cli.py
 #
 # Author: Griffith Thomas
-# Copyright 2022 Spyderbat, Inc.  All rights reserved.
+# Copyright 2022 Spyderbat, Inc. All rights reserved.
 #
 
 """
@@ -10,12 +10,14 @@ Contains the logic to process cli arguments and start the application
 """
 
 import time
-import click
 import gzip
-
 from datetime import datetime
 from typing import Optional
 from os.path import exists
+
+import click
+from spydertop.config import Config
+from spydertop.screens import start_screen
 
 from spydertop.utils import convert_to_seconds
 
@@ -45,13 +47,18 @@ class Timestamp(click.ParamType):
             timestamp = datetime.fromisoformat(value)
             return timestamp.timestamp()
         except ValueError:
-            timestamp = convert_to_seconds(value)
+            try:
+                timestamp = convert_to_seconds(value)
 
-            if timestamp < 0:
-                timestamp = time.time() + timestamp
-            return timestamp
-        except Exception as e:
-            self.fail(f"Unable to convert input into timestamp: {value} {e}")
+                if timestamp < 0:
+                    timestamp = time.time() + timestamp
+                return timestamp
+            except ValueError:
+                self.fail(
+                    f"{value} is not a valid timestamp. "
+                    "Please use a valid timestamp or a relative time "
+                    "using the following units: s, m, h, d, y",
+                )
 
     def get_missing_message(self, param):
         return "TIMESTAMP is required to fetch the correct records"
@@ -77,8 +84,8 @@ class Duration(click.ParamType):
         try:
             timestamp = convert_to_seconds(value)
             return timestamp
-        except Exception as e:
-            self.fail(f"Unable to convert input into duration: {value} {e}")
+        except ValueError as exc:
+            self.fail(f"Unable to convert input into duration: {value} {exc}")
 
 
 class FileOrUrl(click.ParamType):
@@ -90,9 +97,6 @@ class FileOrUrl(click.ParamType):
 
     name = "File or Url"
 
-    def __init__(self):
-        return super().__init__()
-
     def convert(
         self, value: str, param: Optional[click.Parameter], ctx: Optional[click.Context]
     ):
@@ -101,18 +105,18 @@ class FileOrUrl(click.ParamType):
         if exists(value):
             try:
                 # first, determine if it is JSON or GZIP
-                f = open(value, "rb")
-                magic_bytes = f.read(2)
-                f.close()
+                tmp = open(value, "rb")
+                magic_bytes = tmp.read(2)
+                tmp.close()
                 if magic_bytes == b"\x1f\x8b":
                     # GZIP file detected
                     return gzip.open(value, "rt")
                 else:
                     # other file detected, assuming JSON
-                    return open(value, "r")
+                    return open(value, "r", encoding="utf-8")
 
-            except Exception as e:
-                self.fail(f"Unable to open file {value}: {e}")
+            except FileNotFoundError as exc:
+                self.fail(f"Unable to open file {value}: {exc}")
         else:
             # first see if it is a file, but a non-existent one
             if value.endswith(".json") or value.endswith(".json.gz"):
@@ -132,26 +136,30 @@ class FileOrUrl(click.ParamType):
     "--organization",
     "-g",
     type=str,
-    help="The organization ID to pull data from. Defaults to the values set in your sbapi config",
+    help="The organization ID to pull data from. Defaults to the values set in your spyderbat_api config",
 )
 @click.option(
-    "--source",
-    "-s",
+    "--machine",
+    "-m",
     type=str,
-    help="The source ID to pull data from. This should be in the format 'mach:aEdYih-4bia'. Defaults to the values set in your sbapi config",
+    help="The machine ID to pull data from. This should be in the format 'mach:aEdYih-4bia'. \
+Defaults to the values set in your spyderbat_api config",
 )
 @click.option(
     "--duration",
     "-d",
     default=300,
     type=Duration(),
-    help="What period of time records should be pre-fetched for playback in seconds. Defaults to 5 minutes",
+    help="What period of time records should be pre-fetched for playback in seconds. \
+Defaults to 5 minutes",
 )
 @click.option(
     "--input",
     "-i",
+    "input_file",
     type=FileOrUrl(),
-    help="If set, spydertop with use the specified input file or domain instead of fetching records from the production Spyderbat API",
+    help="If set, spydertop with use the specified input file or domain instead of \
+fetching records from the production Spyderbat API",
 )
 @click.option(
     "--output",
@@ -160,18 +168,26 @@ class FileOrUrl(click.ParamType):
     help="If set, spydertop with use the specified output file to save the loaded records",
 )
 @click.option(
+    "--confirm/--no-confirm",
+    "-c/-C",
+    default=True,
+    help="Ask for confirmation of values saved in the config file",
+)
+@click.option(
     "--log-level",
     type=str,
     default="WARN",
-    help="What level of verbostiy in logs, one of INFO, DEBUG, WARN, ERROR. Defaults to WARN",
+    help="What level of verbosity in logs, one of DEBUG, INFO, WARN, ERROR. Defaults to WARN",
     envvar="SPYDERTOP_LOG_LEVEL",
 )
 @click.argument("timestamp", type=Timestamp(), required=False)
-def cli(organization, source, input, output, timestamp, duration, log_level):
+def cli(
+    organization, machine, input_file, output, timestamp, duration, confirm, log_level
+):
     """
-    Fetches data from the specified org and source, or the defaults specified
-    in ~/.sbapi/config and presents an htop-like interface for the state of
-    the source at the specified time.
+    Fetches data from the specified org and machine, or the defaults specified
+    in ~/.spyderbat-api/config, and presents an htop-like interface for the state of
+    the machine at the specified time.
 
     TIMESTAMP: Fetch records after this time; use negative for relative to now.
     Note: due to argument parsing limitations, this value may need to be
@@ -185,11 +201,16 @@ def cli(organization, source, input, output, timestamp, duration, log_level):
 
     spydertop -- -5.5d
     """
-    from spydertop.config import Config
-    from spydertop.screens import start_screen
 
     config = Config(
-        organization, source, input, output, timestamp, duration, log_level=log_level
+        organization,
+        machine,
+        input_file,
+        output,
+        timestamp,
+        duration,
+        confirm,
+        log_level,
     )
 
     start_screen(config)

@@ -2,7 +2,7 @@
 # model.py
 #
 # Author: Griffith Thomas
-# Copyright 2022 Spyderbat, Inc.  All rights reserved.
+# Copyright 2022 Spyderbat, Inc. All rights reserved.
 #
 
 """
@@ -10,20 +10,21 @@ The main app model for the application, containing all logic necessary
 to fetch and cache data from the Spyderbat API
 """
 
-from math import nan
 import threading
 import json
 import gzip
+from math import nan
 from datetime import datetime, timedelta
-from typing import Dict, NewType, Optional, Set, List, Any, Tuple, Union
+from typing import Callable, Dict, NewType, Optional, Set, List, Any, Tuple, Union
 
-import sbapi
-from sbapi.api import source_data_api
-from sbapi.model.src_data_query_input import SrcDataQueryInput
+import spyderbat_api
+from spyderbat_api.api import source_data_api, org_api, source_api
+import urllib3
+from urllib3.exceptions import MaxRetryError
 
 from spydertop.config import Config
 from spydertop.cursorlist import CursorList
-from spydertop.utils import log
+from spydertop.utils import TimeSpanTracker, log
 
 # custom types for data held in the model
 Tree = NewType("Tree", Dict[str, Tuple[bool, Optional["Tree"]]])
@@ -47,13 +48,19 @@ class AppModel:
     failed: bool = False
     failure_reason: str = ""
     progress: float = 0
-    thread: Optional[threading.Thread]
     config: Config
     columns_changed: bool = False
+    thread: Optional[threading.Thread] = None
+    api_client: Optional[spyderbat_api.ApiClient] = None
 
-    _timestamp: float
+    # cache for arbitrary states, registered through
+    # register_state
+    _cache: Dict[str, Dict[str, Any]] = {}
+
+    _timestamp: Optional[float]
     _time_elapsed: float = 0
     _last_good_timestamp: float = None
+    _time_span_tracker: TimeSpanTracker = TimeSpanTracker()
 
     _records: Dict[str, Dict[str, Record]] = {
         "model_process": {},
@@ -66,24 +73,41 @@ class AppModel:
     _tree: Optional[Tree] = None
     _top_ids: Set[str] = set()
     _tops: CursorList
-    _machine: Record = None
+    _machine: Optional[Record] = None
     _meminfo: Optional[Dict[str, int]] = None
 
     def __init__(self, config: Config) -> None:
         self.config = config
-        self._timestamp = config.start_time.timestamp()
+        self._timestamp = None
 
         self._tops = CursorList("time", [], self._timestamp)
 
+    def __del__(self):
+        if self.thread:
+            self.thread.join()
+        if self.api_client:
+            self.api_client.close()
+
     def init(self) -> None:
-        """Initialize the model, loading data from the source"""
+        """Initialize the model, loading data from the source. Requires config to be complete"""
+        self._timestamp = (
+            self.config.start_time.timestamp() if self.config.start_time else None
+        )
+
+        if self.api_client is None:
+            self.init_api()
+
+        if not self.config.is_complete:
+            # ideally, this would never happen, as the configuration screen
+            # should complete the configuration before the model is initialized
+            raise Exception("Configuration is incomplete, cannot load data")
 
         def guard():
             try:
                 self.load_data(self._timestamp, self.config.start_duration)
-            except Exception as e:
+            except Exception as exc:  # pylint: disable=broad-except
                 self.fail("An exception occurred while loading data")
-                log.traceback(e)
+                log.traceback(exc)
 
         self.thread = threading.Thread(target=guard)
         self.thread.start()
@@ -92,14 +116,26 @@ class AppModel:
         if self.config.output and self.config.output.name.endswith(".gz"):
             self.config.output = gzip.open(self.config.output.name, "wt")
 
+    def init_api(self) -> None:
+        """Initialize the API client"""
+        if isinstance(self.config.input, str):
+            configuration = spyderbat_api.Configuration(
+                access_token=self.config.api_key, host=self.config.input
+            )
+
+            self.api_client = spyderbat_api.ApiClient(configuration)
+
     def load_data(
-        self, time: float, duration: timedelta = None, before=timedelta(seconds=120)
+        self,
+        timestamp: float,
+        duration: timedelta = None,
+        before=timedelta(seconds=120),
     ) -> None:
         """Load data from the source, either the API or a file, then process it"""
         self.loaded = False
         if duration is None:
             duration = self.config.start_duration
-        log.info(f"Loading data for time: {time} and duration: {duration}")
+        log.info(f"Loading data for time: {timestamp} and duration: {duration}")
         self.loaded = False
         self.progress = 0.0
 
@@ -108,64 +144,65 @@ class AppModel:
 
         if isinstance(source, str):
             # url, load data from api
-            configuration = sbapi.Configuration(
-                access_token=self.config.api_key, host=source
-            )
 
-            with sbapi.ApiClient(configuration) as api_client:
-                api_instance = source_data_api.SourceDataApi(api_client)
-                input_data = SrcDataQueryInput(
-                    data_type="spydergraph",
-                    # request data from a bit earlier, so that the information is properly filled out
-                    start_time=time - before.total_seconds(),
-                    end_time=time + duration.total_seconds(),
-                    org_uid=self.config.org,
-                    src_uid=self.config.source,
+            api_instance = source_data_api.SourceDataApi(self.api_client)
+            input_data = {
+                # request data from a bit earlier, so that the information is properly filled out
+                "st": timestamp - before.total_seconds(),
+                "et": timestamp + duration.total_seconds(),
+                "src": self.config.machine,
+            }
+
+            self._time_span_tracker.add_time_span(input_data["st"], input_data["et"])
+
+            try:
+                log.info("Querying api for spydergraph records")
+                self.progress = 0.1
+                api_response = api_instance.src_data_query_v2(
+                    org_uid=self.config.org, dt="spydergraph", **input_data
                 )
+                lines += api_response.split("\n")
 
-                try:
-                    log.info("Querying api for spydergraph records")
-                    self.progress = 0.1
-                    api_response = api_instance.src_data_query(
-                        src_data_query_input=input_data
-                    )
-                    lines += api_response.split("\n")
+                self.progress = 0.5
 
-                    input_data.data_type = "htop"
-                    self.progress = 0.5
-
-                    log.info("Querying api for resource usage records")
-                    api_response = api_instance.src_data_query(
-                        src_data_query_input=input_data
-                    )
-                    lines += api_response.split("\n")
-                except sbapi.ApiException as e:
-                    self.fail(
-                        f"Loading data from the api failed with reason: {e.reason}"
-                    )
-                    log.traceback(e)
-                    log.log(
-                        f"""\
+                log.info("Querying api for resource usage records")
+                api_response = api_instance.src_data_query_v2(
+                    org_uid=self.config.org, dt="htop", **input_data
+                )
+                lines += api_response.split("\n")
+            except spyderbat_api.ApiException as exc:
+                self.fail(f"Loading data from the api failed with reason: {exc.reason}")
+                log.traceback(exc)
+                log.debug(
+                    f"""\
 Debug info:
     URL requested: {source}/api/v1/source/query/
     Method: POST
-    Status code: {e.status}
-    Reason: {e.reason}
-    Body: {e.body}\
+    Input data: {input_data}
+    Status code: {exc.status}
+    Reason: {exc.reason}
+    Body: {exc.body}\
                             """
-                    )
-                    return
-                except Exception as e:
-                    self.fail("An exception occurred when trying to load from the api.")
-                    log.traceback(e)
-                    log.log(
-                        f"""\
+                )
+                return
+            except MaxRetryError as exc:
+                self.fail(
+                    f"There was an issue trying to connect to the API. Is the url {source} correct?"
+                )
+                log.traceback(exc)
+                return
+            except Exception as exc:  # pylint: disable=broad-except
+                self.fail("An exception occurred when trying to load from the api.")
+                log.traceback(exc)
+                log.debug(
+                    f"""\
 Debug info:
     URL requested: {source}/api/v1/source/query/
-    Method: POST\
+    Method: POST
+    Input data: {input_data}\
                             """
-                    )
-                    return
+                )
+                return
 
         else:
             # file, read in records and parse
@@ -175,10 +212,8 @@ Debug info:
             if len(lines) == 0:
                 # file was most likely already read
                 self.fail(
-                    "The current time is unloaded, but input is from a file. No more records can be loaded."
-                )
-                log.log(
-                    f"Time was changed to {self.time}, but this is not available in the input file: {source.name}"
+                    "The current time is unloaded, but input is from a file. \
+No more records can be loaded."
                 )
                 return
 
@@ -194,7 +229,8 @@ Debug info:
 
         if not lines or len(lines) == 0 or lines[0] == "":
             self.fail(
-                "Loading was successful, but no records were found. Are you asking for the wrong time?"
+                "Loading was successful, but no records were found. \
+Are you asking for the wrong time?"
             )
             return
 
@@ -209,14 +245,13 @@ Debug info:
 
             try:
                 record = json.loads(line)
-            except json.JSONDecodeError as e:
+            except json.JSONDecodeError as exc:
                 log.err(f"Error decoding record: {line}")
-                log.traceback(e)
+                log.traceback(exc)
                 continue
 
             if record["schema"].startswith("event_top"):
                 if record["id"] in self._top_ids:
-                    log.log(f"Skipping duplicate top id: {record['id']}")
                     continue
                 self._top_ids.add(record["id"])
                 event_tops.append(record)
@@ -265,25 +300,15 @@ Debug info:
         """
         try:
             self._tops.update_cursor(self._timestamp)
-            # check if the given time is not loaded
-            # i.e. the closest time is more than 2 seconds away
-            if (
-                not self._tops.is_valid(0)
-                or abs(self._tops[0]["time"] - self.timestamp) > 2
+            # if the time is None, there was no specified time, so
+            # go back to the beginning of the records
+            if self.timestamp is None:
+                self.recover("reload")
+                return
+
+            if not self._time_span_tracker.is_loaded(self._timestamp) and isinstance(
+                self.config.input, str
             ):
-                # if the time is 0, there was no specified time, so
-                # go back to the beginning of the records
-                if self.timestamp == 0.0:
-                    self.recover("reload")
-                    return
-
-                if not isinstance(self.config.input, str):
-                    # we are getting input from a file
-                    self.fail(
-                        f"The time {datetime.fromtimestamp(self.timestamp)} is not available in the input file."
-                    )
-                    return
-
                 # load data for a time farther away from the loaded
                 # time if self._timestamp is close
                 # this is to avoid loading data that is not needed
@@ -303,10 +328,6 @@ Debug info:
                     else closest_time + offset
                 )
 
-                log.log(
-                    f"Loading data from API since tops was invalid. Time to load: {time_to_load}"
-                )
-
                 self.thread = threading.Thread(
                     target=lambda: self.load_data(
                         time_to_load, timedelta(seconds=300), timedelta(seconds=300)
@@ -318,55 +339,148 @@ Debug info:
             # correct the memory information
             self._correct_meminfo()
 
-            # update the time elapsed
-            self._time_elapsed = float(self._tops[0]["time"]) - float(
-                self._tops[-1]["time"]
-            )
+            if self._tops.is_valid(0) and self._tops.is_valid(-1):
+                # update the time elapsed
+                self._time_elapsed = float(self._tops[0]["time"]) - float(
+                    self._tops[-1]["time"]
+                )
+            else:
+                self._time_elapsed = nan
 
             # update the machine
             # there should only be one machine, so we can just use the first one
             if len(self._records["model_machine"]) == 0:
-                self.fail("No machine records were found.")
-                return
-            self._machine = [m for m in self._records["model_machine"].values()][0]
-            if len([m for m in self._records["model_machine"]]) > 1:
+                log.warn("No machine found in the records")
+                self._machine = None
+            else:
+                self._machine = list(self._records["model_machine"].values())[0]
+            if len(self._records["model_machine"]) > 1:
                 log.warn("More than one machine was found in the input data.")
 
-        except Exception as e:
-            log.err(f"Exception occurred while fixing state:")
-            log.traceback(e)
+        except Exception as exc:  # pylint: disable=broad-except
+            log.err("Exception occurred while fixing state:")
+            log.traceback(exc)
             self.fail(
-                f"The time {datetime.fromtimestamp(self.timestamp)} is invalid, not enough information could be loaded."
+                f"""\
+The time {datetime.fromtimestamp(self.timestamp)} is invalid, \
+not enough information could be loaded.\
+"""
             )
 
     @staticmethod
     def _make_branch(
-        id: str, procs_w_children: Dict[str, List], enabled: bool
+        rec_id: str, processes_w_children: Dict[str, List], enabled: bool
     ) -> Tuple[bool, Tree]:
         """Recursively create a tree branch for a process"""
         # branches are tuples of (enabled, {child id: branch})
-        if procs_w_children[id] == []:
+        if processes_w_children[rec_id] == []:
             return None
         branch = (enabled, {})
-        for child in procs_w_children[id]:
-            branch[1][child] = AppModel._make_branch(child, procs_w_children, enabled)
+        for child in processes_w_children[rec_id]:
+            branch[1][child] = AppModel._make_branch(
+                child, processes_w_children, enabled
+            )
         return branch
+
+    def get_orgs(self) -> Optional[List[org_api.Org]]:
+        """Fetch a list of organization for this api_key"""
+        api_instance: org_api.OrgApi = org_api.OrgApi(self.api_client)
+
+        try:
+            orgs = api_instance.org_list(_preload_content=False)
+            orgs = json.loads(orgs.data)
+            return orgs
+        except spyderbat_api.ApiException as exc:
+            self.fail(f"Exception when calling OrgApi: {exc.status} - {exc.reason}")
+            log.traceback(exc)
+            return None
+        except Exception as exc:  # pylint: disable=broad-except
+            self.fail("Exception when calling OrgApi.")
+            log.traceback(exc)
+            return None
+
+    def get_sources(
+        self, page: int = None, page_size: int = None, uid: str = None
+    ) -> Optional[List[Dict]]:
+        """Fetch a list of sources for this api_key"""
+        # this tends to take a long time for large organizations
+        # because the returned json is all one big string
+        #
+        # we tell the api library to give us the raw response
+        # and then parse it ourselves to save some time
+        api_instance: source_api.SourceApi = source_api.SourceApi(self.api_client)
+
+        try:
+            kwargs = {}
+            if page is not None:
+                log.warn("Paging of sources is not currently supported by the API.")
+                kwargs["page"] = page
+            if page_size is not None:
+                log.warn("Paging of sources is not currently supported by the API.")
+                kwargs["page_size"] = page_size
+            if uid is not None:
+                kwargs["agent_uid_equals"] = uid
+            sources: urllib3.HTTPResponse = api_instance.src_list(
+                org_uid=self.config.org,
+                _preload_content=False,
+                **kwargs,
+            )
+            sources: Any = json.loads(sources.data)
+
+            return sources
+        except Exception as exc:  # pylint: disable=broad-except
+            self.fail(f"Exception when calling SourceApi: {exc}")
+            log.traceback(exc)
+            return None
+
+    def log_api(self, data: Dict[str, Any]) -> None:
+        """Send logs to the spyderbat internal logging API"""
+        if self.config.api_key is None:
+            raise Exception("Cannot log without an API key")
+
+        http_handler = urllib3.PoolManager()
+
+        try:
+            data["source"] = "spydertop"
+            # send the data to the API
+            response = http_handler.request(
+                "POST",
+                f"{self.config.input}/api/v1/_/log",
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.config.api_key}",
+                },
+                body=json.dumps(data),
+            )
+            # check the response
+            if response.status != 200:
+                # don't fail noisily, the user doesn't care about the log
+                log.debug(
+                    f"Logging API returned status {response.status} with message: {response.data}"
+                )
+        except Exception as exc:  # pylint: disable=broad-except
+            log.debug("Exception when logging to API")
+            log.traceback(exc)
 
     def get_value(self, key, previous=False) -> Any:
         """Provides the specified field on the most recent or the previous
         event_top_data record"""
         index = 0 if not previous else -1
+        if not self.tops_valid():
+            return None
         return self._tops[index][key]
 
     def get_top_processes(
         self,
     ) -> Tuple[Dict[str, Union[str, int]], Dict[str, Union[str, int]]]:
         """Get the resource usage records for the processes at the current time"""
+        if not self.tops_valid():
+            return None, None
         return (self._tops[-1]["processes"], self._tops[0]["processes"])
 
     def rebuild_tree(self) -> None:
         """Create a tree structure for the processes, based on the puid and ppuid"""
-        procs_w_children = {}
+        processes_w_children = {}
         processes = self.processes
 
         # the two main root processes are the kernel and the init process
@@ -374,21 +488,24 @@ Debug info:
         kthreadd = None
         init = None
 
-        for p in processes.values():
+        for proc in processes.values():
             try:
-                if p["id"] not in procs_w_children:
-                    procs_w_children[p["id"]] = []
-                if p["ppuid"] is not None and p["ppuid"] not in procs_w_children:
-                    procs_w_children[p["ppuid"]] = []
-                if p["ppuid"] is not None:
-                    procs_w_children[p["ppuid"]].append(p["id"])
-                if p["pid"] == 1:
-                    init = p["id"]
-                if p["pid"] == 2:
-                    kthreadd = p["id"]
-            except KeyError as e:
-                log.err(f"Process {e} is missing.")
-                log.traceback(e)
+                if proc["id"] not in processes_w_children:
+                    processes_w_children[proc["id"]] = []
+                if (
+                    proc["ppuid"] is not None
+                    and proc["ppuid"] not in processes_w_children
+                ):
+                    processes_w_children[proc["ppuid"]] = []
+                if proc["ppuid"] is not None:
+                    processes_w_children[proc["ppuid"]].append(proc["id"])
+                if proc["pid"] == 1:
+                    init = proc["id"]
+                if proc["pid"] == 2:
+                    kthreadd = proc["id"]
+            except KeyError as exc:
+                log.err(f"Process {exc} is missing.")
+                log.traceback(exc)
                 continue
 
         self._tree = {}
@@ -396,13 +513,13 @@ Debug info:
         # add the root processes to the tree
         if kthreadd:
             self._tree[kthreadd] = AppModel._make_branch(
-                kthreadd, procs_w_children, not self.config["collapse_tree"]
+                kthreadd, processes_w_children, not self.config["collapse_tree"]
             )
             # root processes are always enabled
             self._tree[kthreadd] = (True, self._tree[kthreadd][1])
         if init:
             self._tree[init] = AppModel._make_branch(
-                init, procs_w_children, not self.config["collapse_tree"]
+                init, processes_w_children, not self.config["collapse_tree"]
             )
             self._tree[init] = (True, self._tree[init][1])
 
@@ -411,7 +528,7 @@ Debug info:
         The method can be one of:
             - "revert": revert to the last loaded time
             - "reload": go back to the earliest valid time
-            - "retry": try to load the data again, using source"""
+            - "retry": try to load the data again, using the input source"""
 
         log.info(f"Attempting to recover state using {method}")
 
@@ -435,11 +552,11 @@ Debug info:
                 while not new_meminfo and index < len(self._tops.data):
                     new_meminfo = self._tops.data[index]["memory"]
                     index += 1
-                starting_time = self._tops.data[index]["time"]
+                if index < len(self._tops.data):
+                    self.timestamp = self._tops.data[index]["time"]
+                elif len(self._tops.data) > 0:
+                    self.timestamp = self._tops.data[0]["time"]
                 self._meminfo = new_meminfo
-                self.timestamp = starting_time
-
-                log.log(f"Using {starting_time} as new time")
 
             elif method == "retry":
                 log.info("Retrying loading from the API.")
@@ -452,7 +569,7 @@ Debug info:
             # sanity check
             if not self.is_valid():
                 self.fail("Recovering failed to find a valid time.")
-                log.log(
+                log.debug(
                     f"Time: {self._tops.cursor}, # of Records: {len(self._tops.data)}"
                 )
                 return
@@ -460,9 +577,9 @@ Debug info:
             self.failed = False
             self.failure_reason = ""
             self.loaded = True
-        except Exception as e:
-            log.err(f"Exception occurred while recovering:")
-            log.traceback(e)
+        except Exception as exc:  # pylint: disable=broad-except
+            log.err("Exception occurred while recovering:")
+            log.traceback(exc)
             self.fail("An exception occurred while attempting to recover.")
 
     def fail(self, reason: str) -> None:
@@ -471,16 +588,38 @@ Debug info:
         self.failed = True
         self.failure_reason = reason
 
+    def tops_valid(self) -> bool:
+        """Return whether the event top data is valid for this time"""
+        grace_period = 5
+        return (
+            self._tops.is_valid(0)
+            and self._tops.is_valid(-1)
+            and abs(self._tops[0]["time"] - self._timestamp) < grace_period
+        )
+
+    def use_state(
+        self, name: str, initial_value: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], Callable]:
+        """Manage state similar to a React state; this is used to retain
+        information after resize"""
+        if name not in self._cache:
+            self._cache[name] = initial_value
+
+        def set_state(**kwargs):
+            self._cache[name].update(kwargs)
+
+        return self._cache[name], set_state
+
     def is_valid(self) -> bool:
         """Determine if there is enough information
         loaded to be able to use the data"""
         return (
             self.loaded
-            and self._tops.is_valid(-1)
-            and self._tops.is_valid(2)  # add some buffer in front
-            and not abs(self._tops[0]["time"] - self._timestamp) > 2
-            and self._meminfo is not None
-            and self._machine is not None
+            and self._timestamp is not None
+            and (
+                self._time_span_tracker.is_loaded(self._timestamp)
+                or not isinstance(self.config.input, str)
+            )
         )
 
     @property
@@ -489,7 +628,7 @@ Debug info:
         if log.log_level == log.DEBUG:
             try:
                 return log.lines[-1]
-            except:
+            except IndexError:
                 pass
         return f"Time: {self.time}"
 
@@ -501,13 +640,13 @@ Debug info:
     @property
     def memory(self) -> Dict[str, int]:
         """The most recent memory usage data"""
+        if not self.tops_valid():
+            return None
         return self._meminfo
 
     @property
-    def machine(self) -> Dict[str, Record]:
+    def machine(self) -> Optional[Record]:
         """The most recent machine data"""
-        if self._machine is None:
-            raise Exception("No machine record was loaded.")
         return self._machine
 
     @property
@@ -552,8 +691,10 @@ Debug info:
 
     # time properties
     @property
-    def time(self) -> datetime:
+    def time(self) -> Optional[datetime]:
         """The current time, as a datetime object"""
+        if self._timestamp is None:
+            return None
         return datetime.fromtimestamp(self._timestamp)
 
     @property

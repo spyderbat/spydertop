@@ -1,0 +1,433 @@
+#
+# table.py
+#
+# Author: Griffith Thomas
+# Copyright 2022 Spyderbat, Inc. All rights reserved.
+#
+
+"""
+This module contains a table widget which displays data in a tabular format.
+It extends the functionality of the asciimatics.widgets.MultiColumnListBox
+"""
+
+import re
+from typing import Any, Dict, List, NewType, Optional, Tuple
+
+from asciimatics.screen import Screen
+from asciimatics.event import KeyboardEvent, MouseEvent
+from asciimatics.widgets import Widget
+from asciimatics.parsers import Parser
+from asciimatics.strings import ColouredText
+
+from spydertop.utils import COLOR_REGEX, ExtendedParser
+from spydertop.model import Tree
+from spydertop.config import Config
+
+InternalRow = NewType("InternalRow", Tuple[List[str], List[Any]])
+
+
+class Table(Widget):
+    """
+    The main record table for the application. This table
+    handles the sorting, filtering, and display of the records.
+    """
+
+    tree: Tree
+
+    # format: (name, enabled, width, align)
+    _columns: List[Tuple[str, bool, int, str]] = {}
+    _rows: List[InternalRow] = []
+    _filtered_rows: List[InternalRow] = []
+    _tree_rows: Optional[List[InternalRow]] = None
+
+    _config: Config
+    _parser: Parser = None
+
+    _vertical_offset: int = 0
+    _horizontal_offset: int = 0
+    _selected_row: int = 0
+    _mouse_flip_flop = True
+
+    def __init__(
+        self, config: Config, tree: Tree, name="Table", parser=ExtendedParser()
+    ):
+        super().__init__(
+            name, tab_stop=True, disabled=False, on_focus=None, on_blur=None
+        )
+
+        self._parser = parser
+        self._config = config
+        self.tree = tree
+
+    def update(self, frame_no):
+        # validate the selected row
+        if (
+            self._selected_row >= len(self._filtered_rows)
+            and len(self._filtered_rows) != 0
+        ):
+            self.value = len(self._filtered_rows) - 1
+
+        # first, print the header
+        offset = -self._horizontal_offset
+        for (name, enabled, width, align) in self._columns:
+            if name == self._config["sort_column"]:
+                color, attr, background = self._frame.palette.get(
+                    "table_header_selected", self._frame.palette["selected_focus_field"]
+                )
+                arrow = "↑" if self._config["sort_ascending"] else "↓"
+            else:
+                color, attr, background = self._frame.palette.get(
+                    "table_header", self._frame.palette["title"]
+                )
+                arrow = ""
+            if width == 0:
+                width = max(self._w - offset, 1)
+
+            assert width > 0
+
+            if enabled:
+                self._frame.canvas.paint(
+                    f"{name+arrow:{align}{width}} ",
+                    self._x + offset,
+                    self._y,
+                    color,
+                    attr,
+                    background,
+                )
+                offset += width + 1
+
+        # then, print the rows
+        y_offset = 1
+        for i in range(self._vertical_offset, self._vertical_offset + self._h):
+            if i >= len(self._filtered_rows) or i < 0:
+                break
+            displayable_row, _ = self._filtered_rows[i]
+            x_offset = -self._horizontal_offset
+            if self._selected_row == i:
+                color, attr, background = self._frame.palette.get(
+                    "table_selected", self._frame.palette["selected_focus_field"]
+                )
+                has_color = False
+            else:
+                color, attr, background = self._frame.palette.get(
+                    "table", self._frame.palette["focus_field"]
+                )
+                has_color = True
+            for j, (name, enabled, width, align) in enumerate(self._columns):
+                if enabled:
+                    if width == 0:
+                        width = (
+                            self._w
+                            - sum(_[2] + 1 for _ in self._columns if _[1])
+                            + self._horizontal_offset
+                        )
+                    line = displayable_row[j]
+                    # first, the space needed to pad the text to the correct alignment
+                    # is calculated.
+                    extra_space = width - len(re.sub(COLOR_REGEX, "", str(line)))
+                    left_space = (
+                        0
+                        if align == "<"
+                        else extra_space // 2
+                        if align == "^"
+                        else extra_space
+                    )
+                    spaces = " " * left_space
+                    right_spaces = " " * (extra_space - left_space + 1)
+                    line = f"{spaces}{line}{right_spaces}"
+                    # then, colors are added if needed.
+                    line = ColouredText(line, self._parser) if self._parser else line
+
+                    to_paint = str(line)
+                    if extra_space < 0:
+                        to_paint = to_paint[: width - 1] + "…"
+                    # finally, the line is painted.
+                    self._frame.canvas.paint(
+                        to_paint + " ",
+                        self._x + x_offset,
+                        self._y + y_offset,
+                        color,
+                        attr,
+                        background,
+                        colour_map=line.colour_map
+                        if hasattr(line, "colour_map") and has_color
+                        else None,
+                    )
+                    x_offset += width + 1
+            y_offset += 1
+
+    def process_event(self, event):
+        if isinstance(event, KeyboardEvent):
+            if event.key_code == Screen.KEY_UP:
+                self.value = max(0, self._selected_row - 1)
+                return
+            if event.key_code == Screen.KEY_DOWN:
+                self.value = min(len(self._filtered_rows) - 1, self._selected_row + 1)
+                return
+            if event.key_code == Screen.KEY_LEFT:
+                self._horizontal_offset = max(0, self._horizontal_offset - 1)
+                return
+            if event.key_code == Screen.KEY_RIGHT:
+                self._horizontal_offset += 1
+                return
+            if event.key_code == 337:
+                self.value = max(0, self._selected_row - 5)
+                return
+            if event.key_code == 336:
+                self.value = min(len(self._filtered_rows) - 1, self._selected_row + 5)
+                return
+            if event.key_code == 393:
+                self._horizontal_offset = max(0, self._horizontal_offset - 5)
+                return
+            if event.key_code == 402:
+                self._horizontal_offset += 5
+                return
+            if event.key_code == Screen.KEY_PAGE_UP:
+                self.value = max(0, self._selected_row - self._h + 1)
+                return
+            if event.key_code == Screen.KEY_PAGE_DOWN:
+                self.value = min(
+                    len(self._filtered_rows) - 1, self._selected_row + self._h - 1
+                )
+                return
+            if event.key_code == Screen.KEY_HOME:
+                self.value = 0
+                return
+            if event.key_code == Screen.KEY_END:
+                self.value = len(self._filtered_rows) - 1
+                return
+        if isinstance(event, MouseEvent):
+            if event.buttons & event.LEFT_CLICK != 0:
+                self._mouse_flip_flop = not self._mouse_flip_flop
+                if not self._mouse_flip_flop:
+                    return event
+                this_x, this_y = self.get_location()
+                relative_x = event.x - this_x
+                relative_y = event.y - this_y
+                if relative_x < 0 or relative_x >= self._w:
+                    return event
+                if relative_y < 0 or relative_y >= self._h:
+                    return event
+                if relative_y == 0:
+                    # this is the header
+                    for (name, enabled, width, _) in self._columns:
+                        if not enabled:
+                            continue
+                        if relative_x - width - 1 < 0 or width == 0:
+                            if self._config["sort_column"] == name:
+                                self._config["sort_ascending"] = not self._config[
+                                    "sort_ascending"
+                                ]
+                            else:
+                                self._config["sort_column"] = name
+                            break
+                        relative_x -= width + 1
+                else:
+                    # select the clicked row
+                    self.value = relative_y - 1
+                return
+        return event
+
+    def required_height(self, offset, width):
+        return Widget.FILL_FRAME
+
+    def reset(self):
+        pass
+
+    def set_columns(self, columns: List[Tuple]) -> None:
+        """
+        Set the columns for the table. This uses the same format as the
+        columns in columns.py.
+
+        :param columns: a list of tuples, each with the following keys:
+            - name: the name of the column
+            - displayable: the lambda for displayable data (unused)
+            - align: the alignment of the column
+            - width: the width of the column
+            - sortable: the lambda for sortable data (unused)
+            - enabled: whether the column is enabled or not
+        """
+        self._columns = [
+            (column[0], column[5], column[3], column[2]) for column in columns
+        ]
+
+    def set_rows(
+        self, displayable_rows: List[List[str]], sortable_rows: List[List[Any]]
+    ) -> None:
+        """
+        Set the rows for the table. Both the displayable and sortable rows
+        must be in the same order and have the same number of columns and rows.
+
+        :param displayable_rows: a list of lists of strings, each representing a row
+        :param sortable_rows: a list of lists of sortable data, each representing a row
+        """
+        assert len(displayable_rows) == len(sortable_rows)
+        if len(displayable_rows) != 0:
+            assert len(displayable_rows[0]) == len(sortable_rows[0])
+
+        self._rows = list(zip(displayable_rows, sortable_rows))
+        self.do_sort()
+
+    def do_sort(self) -> None:
+        """
+        Sort the rows according to the configured sort order.
+        """
+
+        # if we are displaying a tree, we need to use the tree to sort
+        # first, and to modify the command
+        if self._config["tree"]:
+            # we need the columns to have an ID
+            assert self._columns[0][0] == "ID"
+            # refactor cached sortable data to be indexed by id
+            sortable = {}
+            for row in self._rows:
+                sortable[row[1][0]] = row
+
+            self._tree_rows = self._sort_level(self.tree, sortable, 0, [])
+        else:
+            self._rows = self._simple_sort(self._rows)
+        self.do_filter()
+
+    def do_filter(self) -> None:
+        """
+        Filter the rows by the configured value.
+        """
+        value = self._config["filter"]
+        rows = self._tree_rows if self._config["tree"] else self._rows
+        if value is None:
+            self._filtered_rows = rows
+            return
+        self._filtered_rows = [
+            row for row in rows if value in " ".join([str(_) for _ in row[0]])
+        ]
+        if self._selected_row >= len(self._filtered_rows):
+            self.value = 0
+
+    def fix_vert_offset(self):
+        """Fix the vertical offset to keep the selected row
+        within the range of the table."""
+        if self._h == 0:
+            # the screen is resizing, so don't do anything
+            self._vertical_offset = 0
+            return
+        if self._selected_row < self._vertical_offset:
+            self._vertical_offset = self._selected_row
+        if self._selected_row >= self._vertical_offset + self._h - 1:
+            self._vertical_offset = self._selected_row - self._h + 2
+
+    def find(self, search: str):
+        """Finds the first row that contains the given search string."""
+        searchable_rows = [
+            " ".join([str(_) for _ in row[0]]) for row in self._filtered_rows
+        ]
+        for i, row in enumerate(searchable_rows):
+            if search in row:
+                self.value = i
+                return
+
+    def get_selected(self) -> InternalRow:
+        """Returns the selected row"""
+        return self._filtered_rows[self._selected_row]
+
+    def _sort_level(
+        self,
+        tree: Dict[str, Any],
+        rows: Dict[str, Tuple],
+        depth: int,
+        parents_end: List[bool],
+    ) -> List[Tuple[Any, int]]:
+        """Sort a level of the tree, appending sorted versions
+        of the children underneath each row."""
+        level = []
+
+        # construct a list of all the children of this level
+        for rec_id, branch in tree.items():
+            if rec_id not in rows:
+                # this process is excluded, so don't include it in the tree
+                continue
+            row = rows[rec_id]
+            level.append(row)
+
+        # sort this level
+        level = self._simple_sort(level)
+
+        # recursively build the final rows
+        sorted_rows = []
+        for i, row in enumerate(level):
+            branch = tree[row[1][0]]
+            new_displayable = [_ for _ in row[0]]
+            prefix = self._make_tree_prefix(
+                depth,
+                branch is None
+                or branch[0]
+                or len([x for x in branch[1].keys() if x in rows]) == 0,
+                i == len(level) - 1,
+                parents_end,
+            )
+            if isinstance(new_displayable[-1], ColouredText):
+                new_displayable[-1] = ColouredText(
+                    prefix + new_displayable[-1].raw_text, self._parser
+                )
+            else:
+                new_displayable[-1] = prefix + new_displayable[-1]
+            sorted_rows.append((new_displayable, row[1]))
+            if branch is not None and branch[0]:
+                sorted_rows.extend(
+                    self._sort_level(
+                        branch[1],
+                        rows,
+                        depth + 1,
+                        parents_end + [i == len(level) - 1],
+                    )
+                )
+
+        return sorted_rows
+
+    def _simple_sort(self, rows: List[InternalRow]) -> List[InternalRow]:
+        """Sort a list of rows by a key, putting all Nones at the end."""
+        if len(rows) == 0:
+            return []
+        key = self._config["sort_column"]
+        ascending = self._config["sort_ascending"]
+        # sort by PID by default
+        col_names = [_[0] for _ in self._columns]
+        if "PID" in col_names:
+            pid_index = col_names.index("PID")
+            rows.sort(key=lambda x: x[1][pid_index])
+
+        if key is None or key not in col_names:
+            return rows
+
+        index = col_names.index(key)
+
+        def key_func(val):
+            return val[1][index]
+
+        none_vals = [n for n in rows if key_func(n) is None]
+        non_none = [n for n in rows if key_func(n) is not None]
+        non_none.sort(key=key_func, reverse=not ascending)
+        return non_none + none_vals
+
+    @staticmethod
+    def _make_tree_prefix(
+        depth: int, not_expandable: bool, end: bool, parents_end: List[bool]
+    ) -> str:
+        """Constructs a prefix for the row showing the tree structure"""
+        if depth == 0:
+            return ""
+        return (
+            "".join(["   " if b else "│  " for b in parents_end[1:]])
+            + ("├" if not end else "└")
+            + ("─" if not_expandable else "+")
+            + " "
+        )
+
+    @property
+    def value(self) -> int:
+        """The selected row"""
+        return self._selected_row
+
+    @value.setter
+    def value(self, value: int):
+        self._selected_row = value
+        self.fix_vert_offset()

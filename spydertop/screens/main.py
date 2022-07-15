@@ -2,7 +2,7 @@
 # main.py
 #
 # Author: Griffith Thomas
-# Copyright 2022 Spyderbat, Inc.  All rights reserved.
+# Copyright 2022 Spyderbat, Inc. All rights reserved.
 #
 
 """
@@ -10,28 +10,26 @@ The main frame for the tool. This frame contains the record list and usage metri
 as well as showing all the menu buttons.
 """
 
+from math import nan
 import re
-import textwrap
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from asciimatics.screen import Screen
 from asciimatics.widgets import (
     Frame,
     Layout,
-    Widget,
-    MultiColumnListBox,
     Button,
     ListBox,
 )
 from asciimatics.exceptions import NextScene, StopApplication
 from asciimatics.event import KeyboardEvent
-from asciimatics.parsers import AsciimaticsParser
+from asciimatics.strings import ColouredText
 
 from spydertop.model import AppModel
 from spydertop.screens.setup import SetupFrame
 from spydertop.screens.meters import (
-    get_memory,
-    get_swap,
+    update_memory,
+    update_swap,
     show_disk_io,
     show_ld_avg,
     show_network,
@@ -40,7 +38,14 @@ from spydertop.screens.meters import (
     show_uptime,
 )
 from spydertop.screens.modals import InputModal, NotificationModal
-from spydertop.utils import COLOR_REGEX, log, convert_to_seconds, pretty_time
+from spydertop.table import Table
+from spydertop.utils import (
+    BetterDefaultDict,
+    ExtendedParser,
+    log,
+    convert_to_seconds,
+    pretty_time,
+)
 from spydertop.columns import (
     PROCESS_COLUMNS,
     SESSION_COLUMNS,
@@ -53,45 +58,50 @@ from spydertop.screens.footer import Footer
 
 
 class MainFrame(Frame):
+    """The main frame for the application"""
+
     # update and caching management
     _model: AppModel
     _old_settings: Dict[str, Any]
     _last_frame: int = 0
-    _widgets_initialized = False
-    needs_screen_refresh = True
-    needs_update = True
-    needs_recalculate = True
-    _cached_options = None
-    _cached_sortable = None
-    _cached_displayable = None
-    _current_columns = PROCESS_COLUMNS
+    _widgets_initialized: bool = False
+    needs_screen_refresh: bool = True
+    needs_update: bool = True
+    needs_recalculate: bool = True
+    _cached_options: Optional[List] = None
+    _cached_sortable: Optional[List] = None
+    _cached_displayable: Optional[List] = None
+    _current_columns: List
     _old_column_val = None
     _last_effects: int = 1
 
     # widgets
-    _main = None
-    _cpus = []
-    _tabs = []
-    _memory = None
-    _swap = None
-    _columns = None
+    _main: Layout = None
+    _footer: Footer
+    _cpus: List[Meter] = []
+    _tabs: List[Button] = []
+    _memory: Meter
+    _swap: Meter
+    _columns: Table
 
     # -- initialization -- #
     def __init__(self, screen, model: AppModel) -> None:
-        initial_data = {
-            "tab": "processes",
-            "column_offset": 0,
-        }
         super().__init__(
             screen,
             screen.height,
             screen.width,
             has_border=False,
             can_scroll=False,
-            data=initial_data,
             name="MainFrame",
         )
         self._model = model
+        self._state, self._set_state = model.use_state(
+            self._name,
+            {
+                "tab": "processes",
+                "tree_enabled": model.config["tree"],
+            },
+        )
         self._old_settings = model.config.settings
 
         self.set_theme(model.config["theme"])
@@ -105,7 +115,11 @@ class MainFrame(Frame):
 
         # meters
         self._cpus = []
-        cpu_count = len(self._model.get_value("cpu_time").keys()) - 1
+        cpu_count = (
+            self._model.machine["machine_cores"]
+            if self._model.machine
+            else len(self._model.get_value("cpu_time") or [])
+        )
         for i in range(0, cpu_count):
             self._cpus.append(
                 Meter(
@@ -154,24 +168,24 @@ class MainFrame(Frame):
 
         # dynamic labels
         header.add_widget(
-            FuncLabel(lambda: show_disk_io(self._model), parser=AsciimaticsParser()),
+            FuncLabel(lambda: show_disk_io(self._model), parser=ExtendedParser()),
             column=0,
         )
         header.add_widget(
-            FuncLabel(lambda: show_network(self._model), parser=AsciimaticsParser()),
+            FuncLabel(lambda: show_network(self._model), parser=ExtendedParser()),
             column=0,
         )
 
         header.add_widget(
-            FuncLabel(lambda: show_tasks(self._model), parser=AsciimaticsParser()),
+            FuncLabel(lambda: show_tasks(self._model), parser=ExtendedParser()),
             column=1,
         )
         header.add_widget(
-            FuncLabel(lambda: show_ld_avg(self._model), parser=AsciimaticsParser()),
+            FuncLabel(lambda: show_ld_avg(self._model), parser=ExtendedParser()),
             column=1,
         )
         header.add_widget(
-            FuncLabel(lambda: show_uptime(self._model), parser=AsciimaticsParser()),
+            FuncLabel(lambda: show_uptime(self._model), parser=ExtendedParser()),
             column=1,
         )
 
@@ -200,22 +214,16 @@ class MainFrame(Frame):
         self._main = Layout([1], fill_frame=True)
         self.add_layout(self._main)
 
-        self._columns = MultiColumnListBox(
-            Widget.FILL_FRAME,
-            [],
-            [],
-            titles=[],
-            name="records_table",
-            parser=AsciimaticsParser(),
-        )
+        self._columns = Table(self._model.config, self._model.tree)
         self._main.add_widget(self._columns)
+        # self._main.add_widget(Padding())
 
         ################# Footer #######################
 
         status = FuncLabel(
             lambda: f"{self._model.state}",
             align=">",
-            parser=AsciimaticsParser(),
+            parser=ExtendedParser(),
             color="focus_button",
         )
         self._footer = Footer(self.calculate_widths([1] * 10 + [3]), self, [], status)
@@ -224,7 +232,7 @@ class MainFrame(Frame):
 
         self.reset()
         self.fix()
-        self._switch_to_tab(self.data["tab"])
+        self._switch_to_tab(self._state["tab"])
         self.switch_focus(self._main, 0, 0)
         self._widgets_initialized = True
 
@@ -261,13 +269,13 @@ class MainFrame(Frame):
                     if "tab" in self.palette:
                         button.custom_colour = (
                             "selected_tab"
-                            if self.data["tab"] == button.text.lower()
+                            if self._state["tab"] == button.text.lower()
                             else "tab"
                         )
                     else:
                         button.custom_colour = (
                             "selected_focus_field"
-                            if self.data["tab"] == button.text.lower()
+                            if self._state["tab"] == button.text.lower()
                             else "focus_field"
                         )
                 self.needs_screen_refresh = True
@@ -281,12 +289,15 @@ class MainFrame(Frame):
             if (
                 conf["hide_threads"] != self._old_settings["hide_threads"]
                 or conf["hide_kthreads"] != self._old_settings["hide_kthreads"]
-            ) and self.data["tab"] == "processes":
+            ) and self._state["tab"] == "processes":
                 self.needs_recalculate = True
             self._old_settings = self._model.config.settings.copy()
+
+        # update columns if needed
         if self._model.columns_changed:
+            self._columns.set_columns(self._current_columns)
             self._model.columns_changed = False
-            self.needs_update = True
+            self.needs_screen_refresh = True
 
         # detect changes in effects (opened/closed)
         if len(self._scene.effects) != self._last_effects:
@@ -302,42 +313,36 @@ class MainFrame(Frame):
                 self.needs_update = True
 
             if self.needs_update:
-                self._build_displayable()
+                self._update_columns()
                 self.needs_update = False
                 self.needs_screen_refresh = True
 
             # update screen if needed
             if self.needs_screen_refresh:
-                self._update_columns()
-
                 # update header
                 for (i, cpu) in enumerate(self._cpus):
-                    cpu.values = update_cpu(i, self._model)
-                (total, values) = get_memory(self._model)
+                    cpu.value = update_cpu(i, self._model)
+                (total, values) = update_memory(self._model)
                 self._memory.total = total
-                self._memory.values = values
-                (total, values) = get_swap(self._model)
+                self._memory.value = values
+                (total, values) = update_swap(self._model)
                 self._swap.total = total
-                self._swap.values = values
+                self._swap.value = values
 
                 self.needs_screen_refresh = False
-                return super().update(frame_no)
-        except Exception as e:
+                # time screen update
+                super().update(frame_no)
+        except Exception as exc:
             self._model.fail("An error occurred while updating the screen.")
-            log.traceback(e)
-            raise NextScene("Failure")
-
-    def reset(self):
-        # log.info("Resetting MainFrame, data is being saved")
-        if self._main is not None:
-            self.switch_focus(self._main, 0, 0)
-        self._initial_data = self.data
-        return super().reset()
+            log.traceback(exc)
+            raise NextScene("Failure") from exc
 
     def process_event(self, event):
         self.needs_screen_refresh = True
+        # force the main table to have focus
+        self.switch_focus(self._main, 0, 0)
         # Do the key handling for this Frame.
-        KEYMAP = {
+        key_map = {
             "q": self._quit,
             "Q": self._quit,
             "[": lambda: self._shift_time(-1.0),
@@ -368,34 +373,19 @@ class MainFrame(Frame):
             "+": self._enable_disable,
             "\n": self._show_details,
         }
-        CTRLKEYMAP = {
-            # some keys are not valid here due to limitations
-            # with key events in the console. Try to only
-            # use lower case letters.
-        }
         if isinstance(event, KeyboardEvent):
-            if event.key_code in {ord(k) for k in KEYMAP.keys()}:
-                KEYMAP[chr(event.key_code)]()
+            if event.key_code in {ord(k) for k in key_map}:
+                key_map[chr(event.key_code)]()
                 return
-            for k in CTRLKEYMAP.keys():
-                if event.key_code == Screen.ctrl(k):
-                    CTRLKEYMAP[k]()
-                    return
             if event.key_code in range(Screen.KEY_F11, Screen.KEY_F1 + 1):
                 self._footer.click(-event.key_code - 2)
-            if event.key_code == Screen.KEY_RIGHT:
-                self._shift_columns(1)
-                return
-            if event.key_code == Screen.KEY_LEFT:
-                self._shift_columns(-1)
-                return
             if (
                 event.key_code == Screen.KEY_TAB
                 or event.key_code == Screen.KEY_BACK_TAB
             ):
                 current_tab_index = 0
                 for i, tab in enumerate(self._tabs):
-                    if tab.text.lower() == self.data["tab"]:
+                    if tab.text.lower() == self._state["tab"]:
                         current_tab_index = i
                         break
                 offset = 1 if event.key_code == Screen.KEY_TAB else -1
@@ -405,7 +395,7 @@ class MainFrame(Frame):
                 self._switch_to_tab(next_tab)
                 return
 
-        # if no widget is focused, focus the table   widget
+        # if no widget is focused, focus the table widget
         try:
             self._layouts[self._focus].focus()
         except IndexError:
@@ -416,95 +406,45 @@ class MainFrame(Frame):
     # -- update handling -- #
     def _update_columns(self):
         """Update the columns in the multi-column list box widget."""
-        columns_to_use = [c for c in self._current_columns if c[5]][
-            self.data["column_offset"] :
-        ]
-
-        # these are changed manually because the functionality
-        # necessary is not available in MultiColumnListBox
-        arrow = "↑" if self._model.config["sort_ascending"] else "↓"
-        self._columns._titles = [
-            v[0] if v[0] != self._model.config["sort_column"] else f"|{v[0]}{arrow}|"
-            for v in columns_to_use
-        ]
-        self._columns._align = [v[2] for v in columns_to_use]
-        self._columns._columns = [
-            v[3] if v[0] != self._model.config["sort_column"] or v[3] == 0 else v[3] + 3
-            for v in columns_to_use
-        ]
-        self._columns._spacing = [0] + [1] * (len(columns_to_use) - 1)
-
-        # shallow copy of the data to avoid modifying the cache
-        options = [_ for _ in self._cached_displayable]
-
-        # remove color from the selected item
-        if self._columns.value is not None and len(options) > 0:
-
-            if self._columns.value >= len(options):
-                self._columns.value = 0
-            try:
-                options[self._columns.value] = [
-                    re.sub(COLOR_REGEX, "", val) for val in options[self._columns.value]
-                ]
-            except IndexError as e:
-                log.err("Index error while updating columns")
-                log.traceback(e)
-
-        self._columns.options = [(v, i) for i, v in enumerate(options)]
-
-    def _build_displayable(self):
-        """Constructs the displayable data for the records list using cached data."""
-        self._cached_displayable = []
-        sorted_rows = self._get_sorted_rows()
-
-        for row in sorted_rows:
-            # filter out rows that don't match the filter
-            if (
-                self._model.config["filter"]
-                and self._model.config["filter"] not in row[-1]
-            ):
-                continue
-            # only use enabled rows which are not hidden due to offset
-            try:
-                row = [row[i] for i, c in enumerate(self._current_columns) if c[5]][
-                    self.data["column_offset"] :
-                ]
-            except IndexError as e:
-                # FIXME: this should not be possible
-                log.err(f"Row was {row}, columns were {self._current_columns}")
-                log.traceback(e)
-                raise e
-            self._cached_displayable.append(row)
+        self._columns.set_columns(self._current_columns)
+        self._columns.set_rows(self._cached_displayable, self._cached_sortable)
 
     def _build_options(self):
         """Build the options for the records table, depending on the current tab."""
-        try:
-            if self.data["tab"] == "processes":
-                self._cached_sortable = self._build_process_options()
+        if self._state["tab"] == "processes":
+            (
+                self._cached_displayable,
+                self._cached_sortable,
+            ) = self._build_process_options()
 
-            if self.data["tab"] == "sessions":
-                self._cached_sortable = self._build_other_options(self._model.sessions)
+        if self._state["tab"] == "sessions":
+            (
+                self._cached_displayable,
+                self._cached_sortable,
+            ) = self._build_other_options(self._model.sessions)
 
-            if self.data["tab"] == "flags":
-                self._cached_sortable = self._build_other_options(self._model.flags)
+        if self._state["tab"] == "flags":
+            (
+                self._cached_displayable,
+                self._cached_sortable,
+            ) = self._build_other_options(self._model.flags)
 
-            if self.data["tab"] == "connections":
-                self._cached_sortable = self._build_other_options(
-                    self._model.connections
-                )
+        if self._state["tab"] == "connections":
+            (
+                self._cached_displayable,
+                self._cached_sortable,
+            ) = self._build_other_options(self._model.connections)
 
-            if self.data["tab"] == "listening":
-                self._cached_sortable = self._build_other_options(self._model.listening)
-
-            self._columns_fresh = True
-        except Exception as e:
-            self._model.fail("An error occurred while updating the records table")
-            log.traceback(e)
+        if self._state["tab"] == "listening":
+            (
+                self._cached_displayable,
+                self._cached_sortable,
+            ) = self._build_other_options(self._model.listening)
 
     def _build_other_options(self, records: Dict[str, Any]) -> Tuple[List, List]:
         """Builds options for records other than the processes tab, using
         the current columns"""
-        # rows = []
+        rows = []
         sortable_rows = []
 
         for record in records.values():
@@ -530,26 +470,17 @@ class MainFrame(Frame):
                     continue
             # build the row for options
             cells = []
-            sortable_cells = {}
+            sortable_cells = []
             for col in self._current_columns:
-                label = col[0]
-                try:
-                    sort_val = col[4](self._model, record)
-                    cells.append(str(col[1](self._model, record)))
-                    sortable_cells[label] = sort_val
-                except Exception as e:
-                    # If there is an issue, use an empty values
-                    log.warn(
-                        f"Error when building other options in column {label}, row {len(rows)}"
-                    )
-                    log.traceback(e)
-                    sortable_cells[label] = None
-                    cells.append("")
+                sort_val = col[4](self._model, record)
+                # pylint: disable=no-value-for-parameter
+                cells.append(str(col[1](self._model, record)))
+                sortable_cells.append(sort_val)
 
-            sortable_cells["displayable"] = cells
+            rows.append(cells)
             sortable_rows.append(sortable_cells)
 
-        return sortable_rows
+        return rows, sortable_rows
 
     def _build_process_options(
         self,
@@ -559,7 +490,11 @@ class MainFrame(Frame):
         event_top data is also required to be bundled in"""
         model_processes = self._model.processes
         previous_et_processes, event_top_processes = self._model.get_top_processes()
-        defaults = event_top_processes["default"]
+        defaults = (
+            event_top_processes["default"]
+            if event_top_processes is not None
+            else BetterDefaultDict(lambda k: nan if k != "state" else "?")
+        )
 
         rows = []
         sortable_rows = []
@@ -570,12 +505,11 @@ class MainFrame(Frame):
             # determine if the record is visible in this time period
             if process["valid_from"] > self._model.timestamp:
                 continue
-            end_time = (
-                process["valid_to"]
-                if "valid_to" in process
-                else process["valid_from"] + process["duration"]
+            end_time = process.get(
+                "valid_to",
+                process["valid_from"] + process["duration"]
                 if "duration" in process
-                else None
+                else None,
             )
             if end_time and end_time < self._model.timestamp - self._model.time_elapsed:
                 continue
@@ -592,7 +526,12 @@ class MainFrame(Frame):
             pid = str(process["pid"])
 
             # if the process is a thread, it may not have a value in the event_top processes
-            if pid in event_top_processes and pid in previous_et_processes:
+            if (
+                event_top_processes is not None
+                and previous_et_processes is not None
+                and pid in event_top_processes
+                and pid in previous_et_processes
+            ):
                 et_process = event_top_processes[pid]
                 prev_et_process = previous_et_processes[pid]
             else:
@@ -601,74 +540,62 @@ class MainFrame(Frame):
 
             # build the row for options
             cells = []
-            sortable_cells = {}
+            sortable_cells = []
             for col in self._current_columns:
-                label = col[0]
-                try:
-                    # expand the event_top data with defaults
-                    if et_process is not None:
-                        full = defaults.copy()
-                        full.update(et_process)
+                # expand the event_top data with defaults
+                if et_process is not None:
+                    full = defaults.copy()
+                    full.update(et_process)
 
-                        prev_full = defaults.copy()
-                        prev_full.update(prev_et_process)
-                    else:
-                        full = None
-                        prev_full = None
+                    prev_full = defaults.copy()
+                    prev_full.update(prev_et_process)
+                else:
+                    full = None
+                    prev_full = None
 
-                    # call the column functions with the full data
-                    sort_val = col[4](self._model, prev_full, full, process)
-                    cell_val = col[1](self._model, prev_full, full, process)
-                    if cell_val is None:
-                        cell_val = ""
-                    cells.append(str(cell_val))
-                    sortable_cells[label] = sort_val
-                except Exception as e:
-                    # if there is a problem, just use an empty value
-                    log.warn(
-                        f"Error when building process options in column {label}, row {len(rows)}"
-                    )
-                    log.traceback(e)
-                    sortable_cells[label] = None
-                    cells.append("")
+                # call the column functions with the full data
+                sort_val = col[4](self._model, prev_full, full, process)
+                cell_val = col[1](self._model, prev_full, full, process)
+                if cell_val is None:
+                    cell_val = ""
+                cells.append(str(cell_val))
+                sortable_cells.append(sort_val)
 
-            sortable_cells["displayable"] = cells
+            rows.append(cells)
             sortable_rows.append(sortable_cells)
 
-        return sortable_rows
+        return rows, sortable_rows
 
     # -- input handling -- #
     def _enable_disable(self):
         """find the currently selected row and enable/disable that
         branch in the model.tree"""
-        if self.data["tab"] != "processes":
+        if self._state["tab"] != "processes":
             return
-        row_index = self._columns.value
-        sorted_rows = self._get_sorted_rows(True)
-        row = sorted_rows[row_index]
+        row = self._columns.get_selected()
 
         def recursive_enable_disable(tree, id_to_ed):
-            for id, branch in tree.items():
+            for rec_id, branch in tree.items():
                 if branch is None:
                     continue
-                if id == id_to_ed:
-                    tree[id] = (not branch[0], branch[1])
+                if rec_id == id_to_ed:
+                    tree[rec_id] = (not branch[0], branch[1])
                     return
                 else:
                     recursive_enable_disable(branch[1], id_to_ed)
 
-        recursive_enable_disable(self._model.tree, row["ID"])
+        recursive_enable_disable(self._model.tree, row[1][0])
         self.needs_update = True
 
     def _switch_buttons(self, version):
         """Switch the footer buttons to the given version"""
-        MAIN = [
+        main = [
             ("Help", self._help),
             ("Setup", self._show_setup),
-            ("Search", lambda: self._show_search()),
-            ("Filter", lambda: self._show_filter()),
+            ("Search", self._show_search),
+            ("Filter", self._show_filter),
             ("Tree", lambda: self._config("tree")),
-            ("SortBy", lambda: self._show_sort_menu()),
+            ("SortBy", self._show_sort_menu),
             ("Time", lambda: self._switch_buttons("time")),
             ("", lambda: None),
             ("Play", self._play),
@@ -676,7 +603,7 @@ class MainFrame(Frame):
         ]
 
         # relative time picker
-        TIME_SELECTION = [
+        time_selection = [
             ("-1 hour", lambda: self._shift_time(-3600.0)),
             ("-15 minutes", lambda: self._shift_time(-60.0 * 15)),
             ("-1 minute", lambda: self._shift_time(-60.0)),
@@ -685,12 +612,12 @@ class MainFrame(Frame):
             ("+1 minute", lambda: self._shift_time(60.0)),
             ("+15 minutes", lambda: self._shift_time(60.0 * 15)),
             ("+1 hour", lambda: self._shift_time(3600.0)),
-            ("Custom", lambda: self._show_time_entry()),
+            ("Custom", self._show_time_entry),
             ("Done", lambda: self._switch_buttons("main")),
         ]
 
         # for when modals are opened
-        MODAL = [
+        modal = [
             ("", lambda: None),
             ("", lambda: None),
             ("", lambda: None),
@@ -704,19 +631,18 @@ class MainFrame(Frame):
         ]
 
         if version == "main":
-            self._footer.set_buttons(MAIN)
+            self._footer.set_buttons(main)
         elif version == "time":
-            self._footer.set_buttons(TIME_SELECTION)
+            self._footer.set_buttons(time_selection)
         elif version == "modal":
-            self._footer.set_buttons(MODAL)
+            self._footer.set_buttons(modal)
 
         self.fix()
 
-    def _switch_to_tab(self, tabname):
+    def _switch_to_tab(self, tab_name):
         """Switch to the given tab, and update the state accordingly"""
         # update state
-        self.data["tab"] = tabname
-        self.data["column_offset"] = 0
+        self._set_state(tab=tab_name)
         self.needs_recalculate = True
         self._model.config["sort_column"] = None
         self._model.config["filter"] = None
@@ -727,37 +653,42 @@ class MainFrame(Frame):
         for button in self._tabs:
             if "tab" in self.palette:
                 button.custom_colour = (
-                    "selected_tab" if self.data["tab"] == button.text.lower() else "tab"
+                    "selected_tab"
+                    if self._state["tab"] == button.text.lower()
+                    else "tab"
                 )
             else:
                 button.custom_colour = (
                     "selected_focus_field"
-                    if self.data["tab"] == button.text.lower()
+                    if self._state["tab"] == button.text.lower()
                     else "focus_field"
                 )
 
         # update columns and sort
-        if tabname == "processes":
+        if tab_name == "processes":
             self._current_columns = PROCESS_COLUMNS
             self._model.config["sort_column"] = "CPU%"
             self._model.config["sort_ascending"] = False
+            self._model.config["tree"] = self._state["tree_enabled"]
+        else:
+            self._model.config["tree"] = False
 
-        if tabname == "sessions":
+        if tab_name == "sessions":
             self._current_columns = SESSION_COLUMNS
             self._model.config["sort_column"] = "I"
             self._model.config["sort_ascending"] = False
 
-        if tabname == "flags":
+        if tab_name == "flags":
             self._current_columns = FLAG_COLUMNS
             self._model.config["sort_column"] = "AGE"
             self._model.config["sort_ascending"] = True
 
-        if tabname == "connections":
+        if tab_name == "connections":
             self._current_columns = CONNECTION_COLUMNS
             self._model.config["sort_column"] = "DURATION"
             self._model.config["sort_ascending"] = True
 
-        if tabname == "listening":
+        if tab_name == "listening":
             self._current_columns = LISTENING_SOCKET_COLUMNS
             self._model.config["sort_column"] = "DURATION"
             self._model.config["sort_ascending"] = True
@@ -768,7 +699,8 @@ class MainFrame(Frame):
         def set_sort(title):
             log.info(f"Switching sort to: {title}")
             self._model.config["sort_column"] = title
-            self.needs_update = True
+            # self._columns.do_sort()
+            # self.needs_screen_refresh = True
 
         menu = InputModal(
             self.screen,
@@ -789,12 +721,8 @@ class MainFrame(Frame):
         def run_search(value):
             if not value:
                 return
-            options = self._columns.options
+            self._columns.find(value)
             self.needs_screen_refresh = True
-            for option in options:
-                if value in str(option[0][-1]):
-                    self._columns.value = option[1]
-                    return
 
         self._scene.add_effect(
             InputModal(
@@ -814,7 +742,7 @@ class MainFrame(Frame):
             try:
                 convert_to_seconds(val)
                 return True
-            except:
+            except ValueError:
                 return False
 
         self._scene.add_effect(
@@ -834,7 +762,6 @@ class MainFrame(Frame):
 
         def set_filter(value):
             self._model.config["filter"] = value
-            self.needs_update = True
 
         self._scene.add_effect(
             InputModal(
@@ -849,30 +776,20 @@ class MainFrame(Frame):
 
     def _show_details(self):
         """Show a modal with details about the selected record"""
-        sorted_rows = self._get_sorted_rows()
+        row = self._columns.get_selected()
 
         label_fg = self.palette["label"][0]
         field_fg = self.palette["field"][0]
-        if label_fg == -1:
-            label_fg = 7
-        if field_fg == -1:
-            field_fg = 7
 
         # convert the sorted rows to a human-readable string
         data_lines = ""
-        for (name, value) in zip(
-            [c[0] for c in self._current_columns], sorted_rows[self._columns.value]
-        ):
+        for (name, value) in zip([c[0] for c in self._current_columns], row[0]):
             # remove any tree characters
+            if isinstance(value, ColouredText):
+                value = value.raw_text
+            value = value.strip()
             if name == "Command":
-                value = re.sub(r"^(│  )*[├└][─+] ", "", value)
-            # wrap the value if it's too long
-            if len(value) > self.screen.width / 2:
-                color = re.match(COLOR_REGEX, value.strip())
-                color = color.group() if color else f"${{{field_fg}}}"
-                value = f"\n    {color}".join(
-                    textwrap.wrap(value, self.screen.width // 2)
-                )
+                value = re.sub(r"^(│  |   )*[├└][─+] ", "", value)
             data_lines += f"${{{label_fg},1}}{name}:${{{field_fg}}} {value}\n"
 
         data_lines = data_lines.rstrip("\n")
@@ -890,16 +807,6 @@ class MainFrame(Frame):
         """Show the setup screen"""
         self._scene.add_effect(SetupFrame(self.screen, self._model))
 
-    def _shift_columns(self, offset: int):
-        """Shift the columns by the given offset."""
-        self.needs_update = True
-        self.data["column_offset"] += offset
-        if self.data["column_offset"] < 0:
-            self.data["column_offset"] = 0
-        visible_columns = [a for a in self._current_columns if a[5]]
-        if self.data["column_offset"] >= len(visible_columns):
-            self.data["column_offset"] = len(visible_columns) - 1
-
     def _play(self):
         """Update the model to play"""
         self._model.config["play"] = not self._model.config["play"]
@@ -908,12 +815,28 @@ class MainFrame(Frame):
         """Shift the time in Model by a given amount."""
         self._model.timestamp += offset
 
+        if not self._model.tops_valid() and self._model.loaded:
+            self.scene.add_effect(
+                NotificationModal(
+                    self.screen,
+                    """\
+${1,1}Warning: ${7}this time is missing some data. \
+Some information displayed may not be accurate\
+""",
+                    self,
+                    frames=30,
+                )
+            )
+
         # if the offset is large, notify the user
         if abs(offset) > 10:
             direction = "forward" if offset > 0 else "backward"
             self._scene.add_effect(
                 NotificationModal(
-                    self.screen, f"Moved {pretty_time(abs(offset))} {direction}", self
+                    self.screen,
+                    f"Moved {pretty_time(abs(offset))} {direction}",
+                    self,
+                    frames=15,
                 )
             )
 
@@ -925,11 +848,19 @@ class MainFrame(Frame):
 
     def _config(self, name: str, value=None):
         """Change a config value, and handle any effects"""
+        if name == "tree":
+            self._state["tree_enabled"] = value or not self._state["tree_enabled"]
+            self._model.config[name] = (
+                self._state["tree_enabled"] and self._state["tab"] == "processes"
+            )
+            return
+
         value = value or not self._model.config[name]
         self._model.config[name] = value
 
         if name == "collapse_tree":
             self._model.rebuild_tree()
+            self._columns.tree = self._model.tree
 
     # -- miscellaneous -- #
     def calculate_widths(self, desired_columns: List[int]) -> List[int]:
@@ -939,128 +870,6 @@ class MainFrame(Frame):
         actual_widths = [int(x / total_desired * total_width) for x in desired_columns]
         actual_widths[-1] += total_width - sum(actual_widths)
         return actual_widths
-
-    def _sort_level(
-        self, tree: Dict[str, Any], rows: Dict[str, Tuple], depth: int
-    ) -> List[Tuple[Any, int]]:
-        """Sort a level of the tree, appending sorted versions
-        of the children underneath each row."""
-        level = []
-
-        # construct a list of all the children of this level
-        for id, branch in tree.items():
-            if id not in rows:
-                # this process is excluded, so don't include it in the tree
-                continue
-            row = rows[id]
-            level.append((row, branch))
-
-        # sort this level
-        level = self.stable_sort(
-            level,
-            self._model.config["sort_column"],
-            self._model.config["sort_ascending"],
-        )
-
-        # recursively build the final rows
-        sorted_rows = []
-        for i, row in enumerate(level):
-            branch = row[1]
-            new_row = row[0]
-            new_row["prefix"] = self._make_tree_prefix(
-                depth,
-                branch is None
-                or branch[0]
-                or len([x for x in branch[1].keys() if x in rows]) == 0,
-                i == len(level) - 1,
-            )
-            sorted_rows.append(new_row)
-            if branch is not None and branch[0]:
-                sorted_rows.extend(self._sort_level(branch[1], rows, depth + 1))
-
-        return sorted_rows
-
-    def _get_sorted_rows(
-        self, return_sortable=False
-    ) -> Union[List[Tuple[Any, int]], List[Any]]:
-        """
-        Calculate the sorted values for the records table.
-        This is useful when you need to reference the options
-        in the order they are displayed on-screen
-        """
-        if self._cached_sortable is None:
-            return []
-
-        # if we are displaying a tree, we need to use the model.tree to sort
-        # first, and to modify the command (only for processes).
-        if self.data["tab"] == "processes" and self._model.config["tree"]:
-            # refactor cached sortable data to be indexed by id
-            sortable = {}
-            for row in self._cached_sortable:
-                sortable[row["ID"]] = row
-            tree = self._model.tree
-            sorted_raw_values = self._sort_level(tree, sortable, 0)
-
-        else:
-            if self._model.config["sort_column"]:
-                sorted_raw_values = self.stable_sort(
-                    self._cached_sortable,
-                    self._model.config["sort_column"],
-                    self._model.config["sort_ascending"],
-                )
-
-            else:
-                # just leave the columns in the order they are in
-                sorted_raw_values = self._cached_sortable
-
-        if return_sortable:
-            return sorted_raw_values
-
-        sorted_rows = []
-
-        for sort_row in sorted_raw_values:
-            row = sort_row["displayable"]
-
-            if self.data["tab"] == "processes" and self._model.config["tree"]:
-                # shallow copy and add the tree prefix
-                row = [_ for _ in row]
-                row[-1] = sort_row["prefix"] + row[-1]
-            sorted_rows.append(row)
-
-        return sorted_rows
-
-    @staticmethod
-    def stable_sort(rows: List[Tuple], key: str, ascending: bool) -> List[Tuple]:
-        """Stable sort a list of rows by a key"""
-        if len(rows) == 0:
-            return []
-        key_func = lambda x: x[key]
-        if isinstance(rows[0], tuple):
-            # sometimes the rows are a tuple of (row, ...)
-            key_func = lambda x: x[0][key]
-            # sort by PID by default
-            if "PID" in rows[0][0]:
-                rows.sort(key=lambda x: x[0]["PID"])
-        else:
-            # sort by PID by default
-            if "PID" in rows[0]:
-                rows.sort(key=lambda x: x["PID"])
-        none_vals = [n for n in rows if key_func(n) is None]
-        non_none = [n for n in rows if key_func(n) is not None]
-        non_none.sort(key=key_func, reverse=not ascending)
-        return non_none + none_vals
-
-    @staticmethod
-    def _make_tree_prefix(depth: int, not_expandable: bool, end: bool) -> str:
-        """Constructs a prefix for the row showing the tree structure"""
-        if depth == 0:
-            return ""
-        return (
-            "│  " * ((depth - 1))
-            + ("├" if not end else "└")
-            + ("─" if not_expandable else "+")
-            + " "
-        )
 
     # -- moving to other frames -- #
     @staticmethod

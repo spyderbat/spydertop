@@ -2,7 +2,7 @@
 # meters.py
 #
 # Author: Griffith Thomas
-# Copyright 2022 Spyderbat, Inc.  All rights reserved.
+# Copyright 2022 Spyderbat, Inc. All rights reserved.
 #
 
 """
@@ -11,6 +11,7 @@ the header meters.
 """
 
 
+from math import nan
 from typing import Dict
 from datetime import timedelta
 
@@ -21,6 +22,8 @@ from spydertop.utils import add_palette, header_bytes
 
 
 def sum_disks(disks: Dict[str, Dict[str, int]]):
+    """Sums the values of disk reads and writes for all disks, ignoring the
+    duplicates or invalid disks"""
     # see https://github.com/htop-dev/htop/blob/main/linux/Platform.c#L578-L593 for reference
     prev_disk_name = ""
     totals: Dict[str, int] = {
@@ -56,9 +59,12 @@ def sum_disks(disks: Dict[str, Dict[str, int]]):
 
 
 def show_disk_io(model: AppModel):
+    """Generates the string for the disk IO meter"""
     # modeled after https://github.com/htop-dev/htop/blob/main/DiskIOMeter.c#L34-L108
     disk = model.get_value("disk")
     prev_disk = model.get_value("disk", previous=True)
+    if disk is None or prev_disk is None:
+        return add_palette("  ${{{meter_label}}}Disk I/O: ${{1,1}}No Data", model)
     disk_count = len(disk.keys()) + 0.00000001
     disk = sum_disks(disk)
     prev_disk = sum_disks(prev_disk)
@@ -75,7 +81,8 @@ def show_disk_io(model: AppModel):
         (disk["sectors_written"] - prev_disk["sectors_written"]) * 512
     )
     return add_palette(
-        "  ${{{meter_label}}}Disk IO: ${{{meter_label},1}}{percent_used}% ${{{meter_label}}}read: ${{2}}{read_bytes} ${{{meter_label}}}write ${{4}}{write_bytes}",
+        "  ${{{meter_label}}}Disk IO: ${{{meter_label},1}}{percent_used}% ${{{meter_label}}}\
+read: ${{2}}{read_bytes} ${{{meter_label}}}write ${{4}}{write_bytes}",
         model,
         percent_used=percent_used,
         read_bytes=read_bytes,
@@ -87,27 +94,33 @@ def show_disk_io(model: AppModel):
 
 
 def show_network(model: AppModel):
-    network_totals = model.get_value("network")["total"]
-    prev_net_totals = model.get_value("network", previous=True)["total"]
+    """Generates the string for the network meter"""
+    network_totals = model.get_value("network")
+    prev_net_totals = model.get_value("network", previous=True)
+    if network_totals is None or prev_net_totals is None:
+        return add_palette("  ${{{meter_label}}}Network: ${{1,1}}No Data", model)
+    network_totals = network_totals["total"]
+    prev_net_totals = prev_net_totals["total"]
     time_elapsed_sec = model.time_elapsed
-    rx = header_bytes(
+    rx_bytes = header_bytes(
         (network_totals["bytes_rx"] - prev_net_totals["bytes_rx"]) / time_elapsed_sec
     )
-    tx = header_bytes(
+    tx_bytes = header_bytes(
         (network_totals["bytes_tx"] - prev_net_totals["bytes_tx"]) / time_elapsed_sec
     )
-    if not (tx[-1]).isdigit():
-        tx += "i"
-    if not (rx[-1]).isdigit():
-        rx += "i"
+    if not (tx_bytes[-1]).isdigit():
+        tx_bytes += "i"
+    if not (rx_bytes[-1]).isdigit():
+        rx_bytes += "i"
     reads = network_totals["reads"] - prev_net_totals["reads"]
     writes = network_totals["writes"] - prev_net_totals["writes"]
 
     return add_palette(
-        "  ${{{meter_label}}}Network: rx: ${{2}}{rx}b/s ${{{meter_label}}}write: ${{4}}{tx}b/s ${{{meter_label}}}({reads}/{writes} reads/writes)",
+        "  ${{{meter_label}}}Network: rx: ${{2}}{rx}b/s ${{{meter_label}}}\
+write: ${{4}}{tx}b/s ${{{meter_label}}}({reads}/{writes} reads/writes)",
         model,
-        rx=rx,
-        tx=tx,
+        rx=rx_bytes,
+        tx=tx_bytes,
         reads=reads,
         writes=writes,
     )
@@ -117,9 +130,16 @@ def show_network(model: AppModel):
 
 
 def show_tasks(model: AppModel):
+    """Generates the string for the task meter"""
     tasks = model.get_value("tasks")
+    if tasks is None:
+        return add_palette("  ${{{meter_label}}}Tasks: ${{1,1}}No Data", model)
     # this is necessary because of how tasks seem to be counted
-    task_count = len(model.get_value("processes")) - tasks["kernel_threads"]
+    processes = model.get_value("processes")
+    if processes is None:
+        task_count = "${1,1}Not Available"
+    else:
+        task_count = len(processes) - tasks["kernel_threads"]
     running = tasks["running"]
     threads = tasks["total_threads"] - tasks["kernel_threads"]
     kthreads = tasks["kernel_threads"]
@@ -156,12 +176,14 @@ def show_tasks(model: AppModel):
 
 
 def show_ld_avg(model: AppModel):
+    """Generates the string for the load average meter"""
     ld_avg = model.get_value("load_avg")
 
-    if len(ld_avg) < 3:
+    if ld_avg is None or len(ld_avg) < 3:
         return add_palette("  ${{{meter_label}}}Load average: ${{1,1}}No Data", model)
     return add_palette(
-        "  ${{{meter_label}}}Load average: ${{{background},1}}{ld_avg[0]} ${{{meter_label},1}}{ld_avg[1]} ${{{meter_label}}}{ld_avg[2]}",
+        "  ${{{meter_label}}}Load average: ${{{background},1}}{ld_avg[0]} \
+${{{meter_label},1}}{ld_avg[1]} ${{{meter_label}}}{ld_avg[2]}",
         model,
         ld_avg=ld_avg,
     )
@@ -171,11 +193,22 @@ def show_ld_avg(model: AppModel):
 
 
 def update_cpu(i, model: AppModel):
+    """Determines the values for use in the CPU meter"""
     # reference: https://github.com/htop-dev/htop/blob/main/linux/Platform.c#L312-L346
-    cpu = model.get_value("cpu_time")[f"cpu{i}"]
-    prev_cpu = model.get_value("cpu_time", previous=True)[f"cpu{i}"]
+    cpu = model.get_value("cpu_time")
+    prev_cpu = model.get_value("cpu_time", previous=True)
+    if (
+        cpu is None
+        or prev_cpu is None
+        or f"cpu{i}" not in cpu
+        or f"cpu{i}" not in prev_cpu
+    ):
+        return None
+    cpu = cpu[f"cpu{i}"]
+    prev_cpu = prev_cpu[f"cpu{i}"]
+
     time_elapsed_sec = model.time_elapsed
-    clk_tck = model.get_value("clk_tck")
+    clk_tck = model.get_value("clk_tck") or nan
     values = [0, 0, 0, 0]
     values[0] = (cpu["nice_time"] - prev_cpu["nice_time"]) / clk_tck / time_elapsed_sec
     values[1] = (
@@ -202,16 +235,17 @@ def update_cpu(i, model: AppModel):
 # --- Memory Meter ---
 
 
-def get_memory(model: AppModel):
+def update_memory(model: AppModel):
+    """Determines the values for use in the memory meter"""
     # reference: https://github.com/htop-dev/htop/blob/main/linux/LinuxProcessList.c#L1778-L1795
     # and https://github.com/htop-dev/htop/blob/main/linux/Platform.c#L354-L357
     mem = model.memory
     if not mem:
-        return (0.00000001, (0, 0, 0, 0))
+        return (None, None)
     total = mem["MemTotal"]
     buffers = mem["Buffers"]
-    usedDiff = mem["MemFree"] + mem["Cached"] + mem["SReclaimable"] + buffers
-    used = total - usedDiff if total >= usedDiff else total - mem["MemFree"]
+    used_diff = mem["MemFree"] + mem["Cached"] + mem["SReclaimable"] + buffers
+    used = total - used_diff if total >= used_diff else total - mem["MemFree"]
     shared = mem["Shmem"]
     cached = mem["Cached"] + mem["SReclaimable"] - shared
     values = [0, 0, 0, 0]
@@ -226,11 +260,12 @@ def get_memory(model: AppModel):
 # --- Swap Meter ---
 
 
-def get_swap(model: AppModel):
+def update_swap(model: AppModel):
+    """Determines the values for use in the swap meter"""
     # reference: https://github.com/htop-dev/htop/blob/main/linux/LinuxProcessList.c#L1793-L1795
     mem = model.memory
     if not mem:
-        return (0.00000001, (0, 0))
+        return (None, None)
     total = mem["SwapTotal"]
     cached = mem["SwapCached"]
     used = total - mem["SwapFree"] - cached
@@ -245,7 +280,10 @@ def get_swap(model: AppModel):
 
 
 def show_uptime(model: AppModel):
+    """Generates the string for the uptime meter"""
     mach = model.machine
+    if mach is None:
+        return add_palette("  ${{{meter_label}}}Uptime: ${{1,1}}No Data", model)
     uptime = timedelta(seconds=model.timestamp - mach["boot_time"])
     return add_palette(
         "  ${{{meter_label}}}Uptime: ${{{background},1}}{uptime}",

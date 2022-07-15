@@ -2,7 +2,7 @@
 # modals.py
 #
 # Author: Griffith Thomas
-# Copyright 2022 Spyderbat, Inc.  All rights reserved.
+# Copyright 2022 Spyderbat, Inc. All rights reserved.
 #
 
 """
@@ -14,14 +14,13 @@ from typing import Callable, Optional
 from asciimatics.widgets import Frame, Text, Layout, Widget
 from asciimatics.screen import Screen
 from asciimatics.event import KeyboardEvent
-from asciimatics.parsers import AsciimaticsParser
-from spydertop.utils import COLOR_REGEX
+from spydertop.utils import COLOR_REGEX, ExtendedParser
 
 from spydertop.widgets import FuncLabel
 
 
 class InputModal(Frame):
-    """A modal frame for recieving input from the user"""
+    """A modal frame for receiving input from the user"""
 
     _text_input: Widget
     _on_change: Optional[Callable[[str], None]]
@@ -107,26 +106,32 @@ class InputModal(Frame):
 class NotificationModal(Frame):
     """A modal frame for displaying a notification"""
 
-    def __init__(self, screen: Screen, text: str, parent: Frame, frames=20) -> None:
+    def __init__(
+        self, screen: Screen, text: str, parent: Frame, frames=20, **kwargs
+    ) -> None:
         """
         :param screen: The screen to draw on
         :param text: The text to display
         :param parent: The parent frame, used for passing events and the theme
         :param frames: The number of frames to display the notification (None for until closed)
         """
-        max_len = max(len(re.sub(COLOR_REGEX, "", line)) for line in text.split("\n"))
-        height = len(text.split("\n"))
+        self._label = FuncLabel(lambda: text, parser=ExtendedParser(), indent="    ")
+        max_len = min(
+            max(len(re.sub(COLOR_REGEX, "", line)) for line in text.split("\n")),
+            screen.width // 2,
+        )
+        height = self._label.required_height(0, max_len)
         super().__init__(
             screen,
             height + 2,
             max_len + 2,
             is_modal=True,
             can_scroll=False,
+            **kwargs,
         )
 
         layout = Layout([1])
         self.add_layout(layout)
-        self._label = FuncLabel(lambda: text, parser=AsciimaticsParser())
         self._parent = parent
         layout.add_widget(self._label)
         layout.blur()

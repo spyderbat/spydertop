@@ -1,4 +1,16 @@
-from typing import Any, Dict, Generic, List, Optional, TypeVar, Union
+#
+# cursorlist.py
+#
+# Author: Griffith Thomas
+# Copyright 2022 Spyderbat, Inc. All rights reserved.
+#
+
+"""
+A cursor-based list which indexes based off of an arbitrary
+cursor position.
+"""
+
+from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 CT = TypeVar("CT")
 
@@ -106,6 +118,7 @@ class CursorList(Generic[CT]):
         assert self.data[self.index + 1][self.key] > self.cursor
 
     def is_valid(self, index: int):
+        """Returns True if the index is valid, False otherwise"""
         return self.index != -1 and 0 <= self.index + index < len(self.data)
 
     def __getitem__(self, index: int) -> Any:
@@ -117,7 +130,8 @@ class CursorList(Generic[CT]):
 
         if offset_index < 0 or offset_index >= len(self.data):
             raise IndexError(
-                f"Cursorlist index out of range: {self.index} + {index} is not in range for 0-{len(self.data)-1}"
+                f"Cursorlist index out of range: \
+{self.index} + {index} is not in range for 0-{len(self.data)-1}"
             )
         return self.data[offset_index]
 
