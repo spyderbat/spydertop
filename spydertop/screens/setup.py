@@ -61,6 +61,14 @@ def change_columns(columns, name):
 def set_config(name):
     """Create a lambda to set a config value"""
 
+    if name == "play_speed":
+
+        def set_play(val, model):
+            if val != 0.0:
+                model.config[name] = val
+
+        return set_play
+
     def inner(val, model):
         model.config[name] = val
 
@@ -146,6 +154,11 @@ OPTIONS = {
                 "Sort Ascending",
                 (True, lambda model: model.config["sort_ascending"]),
                 set_config("sort_ascending"),
+            ),
+            (
+                "Cursor Follows Record",
+                (False, lambda model: model.config["follow_record"]),
+                set_config("follow_record"),
             ),
             (
                 "Play",

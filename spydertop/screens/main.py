@@ -71,7 +71,7 @@ class MainFrame(Frame):
     _cached_options: Optional[List] = None
     _cached_sortable: Optional[List] = None
     _cached_displayable: Optional[List] = None
-    _current_columns: List
+    _current_columns: List = PROCESS_COLUMNS
     _old_column_val = None
     _last_effects: int = 1
 
@@ -214,7 +214,7 @@ class MainFrame(Frame):
         self._main = Layout([1], fill_frame=True)
         self.add_layout(self._main)
 
-        self._columns = Table(self._model.config, self._model.tree)
+        self._columns = Table(self._model, self._model.tree)
         self._main.add_widget(self._columns)
         # self._main.add_widget(Padding())
 
@@ -368,6 +368,7 @@ class MainFrame(Frame):
             "I": lambda: self._config("sort_ascending"),
             "t": lambda: self._config("tree"),
             "*": lambda: self._config("collapse_tree"),
+            "F": lambda: self._config("follow_record"),
             "-": self._enable_disable,
             "=": self._enable_disable,
             "+": self._enable_disable,
@@ -642,27 +643,30 @@ class MainFrame(Frame):
     def _switch_to_tab(self, tab_name):
         """Switch to the given tab, and update the state accordingly"""
         # update state
-        self._set_state(tab=tab_name)
-        self.needs_recalculate = True
-        self._model.config["sort_column"] = None
-        self._model.config["filter"] = None
-        self._cached_options = None
-        self._cached_sortable = None
 
         # update tabs colors
         for button in self._tabs:
             if "tab" in self.palette:
                 button.custom_colour = (
-                    "selected_tab"
-                    if self._state["tab"] == button.text.lower()
-                    else "tab"
+                    "selected_tab" if tab_name == button.text.lower() else "tab"
                 )
             else:
                 button.custom_colour = (
                     "selected_focus_field"
-                    if self._state["tab"] == button.text.lower()
+                    if tab_name == button.text.lower()
                     else "focus_field"
                 )
+        self.needs_screen_refresh = True
+
+        if tab_name == self._state["tab"]:
+            return
+        self._set_state(tab=tab_name)
+        self._columns.value = 0
+        self.needs_recalculate = True
+        self._model.config["sort_column"] = None
+        self._model.config["filter"] = None
+        self._cached_options = None
+        self._cached_sortable = None
 
         # update columns and sort
         if tab_name == "processes":
@@ -699,8 +703,6 @@ class MainFrame(Frame):
         def set_sort(title):
             log.info(f"Switching sort to: {title}")
             self._model.config["sort_column"] = title
-            # self._columns.do_sort()
-            # self.needs_screen_refresh = True
 
         menu = InputModal(
             self.screen,
@@ -742,7 +744,7 @@ class MainFrame(Frame):
             try:
                 convert_to_seconds(val)
                 return True
-            except ValueError:
+            except (ValueError, IndexError):
                 return False
 
         self._scene.add_effect(

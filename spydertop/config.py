@@ -65,6 +65,7 @@ class Config:
         "filter": None,
         "tree": False,
         "collapse_tree": False,
+        "follow_record": False,
         "theme": "htop",
     }
     settings_changed: bool = False

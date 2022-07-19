@@ -20,7 +20,7 @@ from asciimatics.parsers import Parser
 from asciimatics.strings import ColouredText
 
 from spydertop.utils import COLOR_REGEX, ExtendedParser
-from spydertop.model import Tree
+from spydertop.model import AppModel, Tree
 from spydertop.config import Config
 
 InternalRow = NewType("InternalRow", Tuple[List[str], List[Any]])
@@ -45,24 +45,40 @@ class Table(Widget):
 
     _vertical_offset: int = 0
     _horizontal_offset: int = 0
-    _selected_row: int = 0
     _mouse_flip_flop = True
 
     def __init__(
-        self, config: Config, tree: Tree, name="Table", parser=ExtendedParser()
+        self, model: AppModel, tree: Tree, name="Table", parser=ExtendedParser()
     ):
         super().__init__(
             name, tab_stop=True, disabled=False, on_focus=None, on_blur=None
         )
 
+        self._state, self._set_state = model.use_state(
+            name,
+            {
+                "id_to_follow": None,
+                "selected_row": 0,
+            },
+        )
         self._parser = parser
-        self._config = config
+        self._config = model.config
         self.tree = tree
 
     def update(self, frame_no):
+        # select the followed id
+        if self._state["id_to_follow"] is not None and self._config["follow_record"]:
+            for i, row in enumerate(self._filtered_rows):
+                if row[1][0] == self._state["id_to_follow"]:
+                    self.value = i
+                    break
+        else:
+            if len(self._filtered_rows) > 0:
+                self._set_state(id_to_follow=self._filtered_rows[self.value][1][0])
+
         # validate the selected row
         if (
-            self._selected_row >= len(self._filtered_rows)
+            self._state["selected_row"] >= len(self._filtered_rows)
             and len(self._filtered_rows) != 0
         ):
             self.value = len(self._filtered_rows) - 1
@@ -103,7 +119,7 @@ class Table(Widget):
                 break
             displayable_row, _ = self._filtered_rows[i]
             x_offset = -self._horizontal_offset
-            if self._selected_row == i:
+            if self._state["selected_row"] == i:
                 color, attr, background = self._frame.palette.get(
                     "table_selected", self._frame.palette["selected_focus_field"]
                 )
@@ -121,7 +137,7 @@ class Table(Widget):
                             - sum(_[2] + 1 for _ in self._columns if _[1])
                             + self._horizontal_offset
                         )
-                    line = displayable_row[j]
+                    line = displayable_row[j].replace("\n", " ")
                     # first, the space needed to pad the text to the correct alignment
                     # is calculated.
                     extra_space = width - len(re.sub(COLOR_REGEX, "", str(line)))
@@ -159,10 +175,12 @@ class Table(Widget):
     def process_event(self, event):
         if isinstance(event, KeyboardEvent):
             if event.key_code == Screen.KEY_UP:
-                self.value = max(0, self._selected_row - 1)
+                self.value = max(0, self._state["selected_row"] - 1)
                 return
             if event.key_code == Screen.KEY_DOWN:
-                self.value = min(len(self._filtered_rows) - 1, self._selected_row + 1)
+                self.value = min(
+                    len(self._filtered_rows) - 1, self._state["selected_row"] + 1
+                )
                 return
             if event.key_code == Screen.KEY_LEFT:
                 self._horizontal_offset = max(0, self._horizontal_offset - 1)
@@ -171,10 +189,12 @@ class Table(Widget):
                 self._horizontal_offset += 1
                 return
             if event.key_code == 337:
-                self.value = max(0, self._selected_row - 5)
+                self.value = max(0, self._state["selected_row"] - 5)
                 return
             if event.key_code == 336:
-                self.value = min(len(self._filtered_rows) - 1, self._selected_row + 5)
+                self.value = min(
+                    len(self._filtered_rows) - 1, self._state["selected_row"] + 5
+                )
                 return
             if event.key_code == 393:
                 self._horizontal_offset = max(0, self._horizontal_offset - 5)
@@ -183,11 +203,12 @@ class Table(Widget):
                 self._horizontal_offset += 5
                 return
             if event.key_code == Screen.KEY_PAGE_UP:
-                self.value = max(0, self._selected_row - self._h + 1)
+                self.value = max(0, self._state["selected_row"] - self._h + 1)
                 return
             if event.key_code == Screen.KEY_PAGE_DOWN:
                 self.value = min(
-                    len(self._filtered_rows) - 1, self._selected_row + self._h - 1
+                    len(self._filtered_rows) - 1,
+                    self._state["selected_row"] + self._h - 1,
                 )
                 return
             if event.key_code == Screen.KEY_HOME:
@@ -224,7 +245,7 @@ class Table(Widget):
                         relative_x -= width + 1
                 else:
                     # select the clicked row
-                    self.value = relative_y - 1
+                    self.value = relative_y - 1 + self._vertical_offset
                 return
         return event
 
@@ -297,11 +318,50 @@ class Table(Widget):
         if value is None:
             self._filtered_rows = rows
             return
+
+        column_matches, rest = self._parse_filter(value)
+
         self._filtered_rows = [
-            row for row in rows if value in " ".join([str(_) for _ in row[0]])
+            row for row in rows if self._filter_predicate(row, column_matches, rest)
         ]
-        if self._selected_row >= len(self._filtered_rows):
+        if self._state["selected_row"] >= len(self._filtered_rows):
             self.value = 0
+
+    def _filter_predicate(self, row, column_matches, rest) -> bool:
+        for column_match in column_matches:
+            try:
+                index = [_[0].lower() for _ in self._columns].index(
+                    column_match[0].lower()
+                )
+                if index >= len(row[0]):
+                    return False
+                if column_match[1][0] in {"<", ">"}:
+                    if row[1][index] is None:
+                        return False
+                    if column_match[1][0] == "<":
+                        return row[1][index] < float(column_match[1][1:])
+                    else:
+                        return row[1][index] > float(column_match[1][1:])
+                if column_match[1][0] == "!" and column_match[1][1:] in row[0][index]:
+                    return False
+                if (column_match[1][0] != "!") and not column_match[1] in row[0][index]:
+                    return False
+            except ValueError:
+                pass
+        return rest in " ".join([str(_) for _ in row[0]])
+
+    def _parse_filter(self, value: str) -> List[Tuple[str, str]]:
+        """
+        Parse a filter string into a list of tuples of the form (column, value).
+        """
+        column_matches = []
+        match_regex = r"\s*(\S+): ?(\S+)"
+        match = re.match(match_regex, value)
+        while match:
+            column_matches.append((match.group(1), match.group(2)))
+            value = value[match.end() :]
+            match = re.match(match_regex, value)
+        return column_matches, value.strip()
 
     def fix_vert_offset(self):
         """Fix the vertical offset to keep the selected row
@@ -310,24 +370,25 @@ class Table(Widget):
             # the screen is resizing, so don't do anything
             self._vertical_offset = 0
             return
-        if self._selected_row < self._vertical_offset:
-            self._vertical_offset = self._selected_row
-        if self._selected_row >= self._vertical_offset + self._h - 1:
-            self._vertical_offset = self._selected_row - self._h + 2
+        if self._state["selected_row"] < self._vertical_offset:
+            self._vertical_offset = self._state["selected_row"]
+        if self._state["selected_row"] >= self._vertical_offset + self._h - 1:
+            self._vertical_offset = self._state["selected_row"] - self._h + 2
 
     def find(self, search: str):
         """Finds the first row that contains the given search string."""
-        searchable_rows = [
-            " ".join([str(_) for _ in row[0]]) for row in self._filtered_rows
-        ]
-        for i, row in enumerate(searchable_rows):
-            if search in row:
+        # searchable_rows = [
+        #     " ".join([str(_) for _ in row[0]]) for row in self._filtered_rows
+        # ]
+        column_matches, rest = self._parse_filter(search)
+        for i, row in enumerate(self._filtered_rows):
+            if self._filter_predicate(row, column_matches, rest):
                 self.value = i
                 return
 
     def get_selected(self) -> InternalRow:
         """Returns the selected row"""
-        return self._filtered_rows[self._selected_row]
+        return self._filtered_rows[self._state["selected_row"]]
 
     def _sort_level(
         self,
@@ -425,9 +486,16 @@ class Table(Widget):
     @property
     def value(self) -> int:
         """The selected row"""
-        return self._selected_row
+        return self._state["selected_row"]
 
     @value.setter
     def value(self, value: int):
-        self._selected_row = value
+        if len(self._filtered_rows) == 0:
+            return
+        if value < 0:
+            value = 0
+        if value >= len(self._filtered_rows):
+            value = len(self._filtered_rows) - 1
+        self._set_state(selected_row=value)
+        self._set_state(id_to_follow=self._filtered_rows[value][1][0])
         self.fix_vert_offset()

@@ -115,6 +115,8 @@ def add_palette(text, model, **kwargs) -> Callable[[], str]:
     concrete_palette = {
         "background": palette["background"][0],
         "borders": palette["borders"][0],
+        "button": palette["button"][0],
+        "button_bg": palette["button"][2],
         "label": palette["label"][0],
         "meter_label": (palette.get("meter_label", palette["label"]))[0],
     }

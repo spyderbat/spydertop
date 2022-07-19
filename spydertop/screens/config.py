@@ -39,7 +39,7 @@ from asciimatics.exceptions import NextScene, StopApplication
 from spydertop.config import Config
 from spydertop.model import AppModel
 from spydertop.widgets import FuncLabel, Padding
-from spydertop.utils import ExtendedParser, pretty_datetime, log
+from spydertop.utils import COLOR_REGEX, ExtendedParser, pretty_datetime, log
 
 
 class ConfigurationFrame(Frame):
@@ -544,6 +544,55 @@ see the help page for more information.\
 
         default_time = datetime.now() - timedelta(minutes=15)
 
+        # quick time selector
+
+        # get source create time
+        source_time = self.cache.get("source", {}).get("valid_from", None)
+        if source_time is not None:
+            source_time = datetime.strptime(source_time, "%Y-%m-%dT%H:%M:%SZ")
+            source_time = source_time.replace(tzinfo=timezone.utc)
+            source_time_local = source_time.astimezone(tz=default_time.tzinfo)
+            # offset by a bit to allow for records to come in.
+            source_time_local += timedelta(minutes=1)
+
+            def button_callback():
+                date.value = source_time_local
+                time.value = source_time_local.time()
+                on_change()
+
+            create_time_button = Button(
+                "Use Nano Agent Create Time: "
+                + re.sub(COLOR_REGEX, "", pretty_datetime(source_time_local)),
+                button_callback,
+            )
+            self.layout.add_widget(Padding(), 1)
+            self.layout.add_widget(create_time_button, 1)
+
+        last_seen_time = self.cache.get("source", {}).get(
+            "last_stored_chunk_end_time", None
+        )
+        if last_seen_time is not None:
+            last_seen_time = datetime.strptime(last_seen_time, "%Y-%m-%dT%H:%M:%SZ")
+            last_seen_time = last_seen_time.replace(tzinfo=timezone.utc)
+            last_seen_time_local = last_seen_time.astimezone(tz=default_time.tzinfo)
+            if last_seen_time_local < default_time.replace(
+                tzinfo=last_seen_time_local.tzinfo
+            ):
+                default_time = last_seen_time_local
+
+            def last_seen_button_callback():
+                date.value = last_seen_time_local
+                time.value = last_seen_time_local.time()
+                on_change()
+
+            last_seen_button = Button(
+                "Use Last Seen Time: "
+                + re.sub(COLOR_REGEX, "", pretty_datetime(last_seen_time_local)),
+                last_seen_button_callback,
+            )
+            self.layout.add_widget(Padding(), 1)
+            self.layout.add_widget(last_seen_button, 1)
+
         date.value = default_time
         time.value = default_time.time()
 
@@ -692,6 +741,7 @@ arguments (except for the API Key).\
         """Format a source for display"""
         return [
             source.get("description", ""),
+            " ",
             pretty_datetime(
                 datetime.strptime(
                     source["last_stored_chunk_end_time"],
@@ -700,7 +750,12 @@ arguments (except for the API Key).\
             )
             if "last_stored_chunk_end_time" in source
             else "",
-            str(source["last_stored_chunk_end_time"]),
+            str(
+                datetime.strptime(
+                    source["last_stored_chunk_end_time"],
+                    "%Y-%m-%dT%H:%M:%SZ",
+                )
+            ),
         ]
 
     def set_state(self, key: str, value: Any) -> None:
@@ -719,6 +774,7 @@ arguments (except for the API Key).\
     def set_source(self, source: Source) -> None:
         """Set the source"""
         self.config.machine = source["uid"]
+        self.set_cache(source=source)
         self.config.source_confirmed = True
         self.trigger_build()
 

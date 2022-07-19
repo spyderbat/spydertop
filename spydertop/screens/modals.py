@@ -31,7 +31,7 @@ class InputModal(Frame):
         self,
         screen: Screen,
         value=None,
-        width=30,
+        width=40,
         theme="htop",
         on_change: Optional[Callable[[str], None]] = None,
         on_submit: Optional[Callable[[str], None]] = None,

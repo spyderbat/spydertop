@@ -19,6 +19,7 @@ The format for each of the columns is a tuple of:
 """
 
 from datetime import datetime
+import json
 
 from spydertop.utils import pretty_address, pretty_bytes, pretty_time, PAGE_SIZE
 
@@ -95,6 +96,14 @@ def color_cmd(_m, _pr, _r, p):
 PROCESS_COLUMNS = [
     ("ID", lambda m, pr, r, p: p["id"], "<", 30, lambda m, pr, r, p: p["id"], False),
     (
+        "PPID",
+        lambda m, pr, r, p: int(p["ppid"]),
+        ">",
+        7,
+        lambda m, pr, r, p: int(p["ppid"]),
+        False,
+    ),
+    (
         "PID",
         lambda m, pr, r, p: int(p["pid"]),
         ">",
@@ -109,6 +118,14 @@ PROCESS_COLUMNS = [
         9,
         lambda m, pr, r, p: p["euser"],
         True,
+    ),
+    (
+        "AUSER",
+        lambda m, pr, r, p: p["auser"] if p["auser"] != "SYSTEM" else "${8,1}SYSTEM",
+        "<",
+        9,
+        lambda m, pr, r, p: p["auser"],
+        False,
     ),
     (
         "START_TIME",
@@ -151,7 +168,7 @@ PROCESS_COLUMNS = [
         lambda m, pr, r, p: pretty_bytes(r["rss"] * PAGE_SIZE) if r else "",
         ">",
         5,
-        lambda m, pr, r, p: int(r["rss"]) if r else None,
+        lambda m, pr, r, p: int(r["rss"]) * PAGE_SIZE if r else None,
         True,
     ),
     (
@@ -172,6 +189,24 @@ PROCESS_COLUMNS = [
         lambda m, pr, r, p: r["state"] if r else None,
         True,
     ),
+    (
+        "TYPE",
+        lambda m, pr, r, p: (
+            p["type"] if p["type"] != "kernel thread" else "${8,1}kthread"
+        ),
+        "<",
+        7,
+        lambda m, pr, r, p: p["type"],
+        False,
+    ),
+    (
+        "I",
+        lambda m, pr, r, p: "${2}Y" if p["interactive"] else "${1}N",
+        ">",
+        1,
+        lambda m, pr, r, p: p["interactive"],
+        True,
+    ),
     ("CPU%", get_cpu_per, ">", 4, get_cpu_per, True),
     ("MEM%", get_mem_per, ">", 4, get_mem_per, True),
     ("TIME+", get_time_plus, ">", 9, get_time_plus_value, True),
@@ -181,6 +216,14 @@ PROCESS_COLUMNS = [
         ">",
         9,
         lambda m, pr, r, p: m.timestamp - p["valid_from"],
+        False,
+    ),
+    (
+        "ANCESTORS",
+        lambda m, pr, r, p: "/".join(p.get("ancestors", None) or []),
+        "<",
+        30,
+        lambda m, pr, r, p: "/".join(p.get("ancestors", None) or []),
         False,
     ),
     (
@@ -197,6 +240,16 @@ PROCESS_COLUMNS = [
         ">",
         9,
         lambda m, pr, r, p: p["container"] if "container" in p else None,
+        False,
+    ),
+    (
+        "ENVIRONMENT",
+        lambda m, pr, r, p: json.dumps(
+            p.get("environ", None) or {}, indent=4, sort_keys=True
+        ),
+        "<",
+        11,
+        lambda m, pr, r, p: json.dumps(p.get("environ", None) or {}),
         False,
     ),
     ("Command", color_cmd, "<", 0, lambda m, pr, r, p: f'{" ".join(p["args"])}', True),
@@ -227,6 +280,16 @@ SESSION_COLUMNS = [
         "<",
         9,
         lambda m, s: s["auser"],
+        False,
+    ),
+    (
+        "PARENT",
+        lambda m, s: m.sessions[s["psuid"]]["euser"]
+        if s["psuid"] is not None and s["psuid"] in m.sessions
+        else "",
+        "<",
+        9,
+        lambda m, s: s["psuid"],
         False,
     ),
     (
@@ -300,10 +363,26 @@ CONNECTION_COLUMNS = [
         True,
     ),
     (
+        "TXPACK",
+        lambda m, c: c["packets_tx"],
+        ">",
+        6,
+        lambda m, c: c["packets_tx"],
+        False,
+    ),
+    (
+        "RXPACK",
+        lambda m, c: c["packets_rx"],
+        ">",
+        6,
+        lambda m, c: c["packets_rx"],
+        False,
+    ),
+    (
         "TXBYTES",
         lambda m, c: pretty_bytes(c["bytes_tx"]),
         ">",
-        5,
+        7,
         lambda m, c: c["bytes_tx"],
         True,
     ),
@@ -311,7 +390,7 @@ CONNECTION_COLUMNS = [
         "RXBYTES",
         lambda m, c: pretty_bytes(c["bytes_rx"]),
         ">",
-        5,
+        7,
         lambda m, c: c["bytes_rx"],
         True,
     ),
@@ -324,6 +403,16 @@ CONNECTION_COLUMNS = [
         True,
     ),
     (
+        "PEER",
+        lambda m, c: f'{c["peer_proc_name"]} on {c["peer_muid"]}'
+        if "peer_proc_name" in c and "peer_muid" in c
+        else "${8,1}EXTERNAL",
+        "<",
+        20,
+        lambda m, c: c.get("peer_proc_name", "EXTERNAL"),
+        False,
+    ),
+    (
         "LOCAL",
         lambda m, c: pretty_address(c["local_ip"], c["local_port"]),
         ">",
@@ -333,7 +422,11 @@ CONNECTION_COLUMNS = [
     ),
     (
         "DIR",
-        lambda m, c: "${3}<--" if c["direction"] == "inbound" else "${4}-->",
+        lambda m, c: "${3}<--"
+        if c["direction"] == "inbound"
+        else "${4}-->"
+        if c["direction"] == "outbound"
+        else "${8,1}?",
         "^",
         3,
         lambda m, c: c["direction"] == "inbound",
@@ -397,6 +490,26 @@ FLAG_COLUMNS = [
     ),
     ("SEV", color_severity, "^", 3, lambda m, f: SEVERITIES[f["severity"]], True),
     (
+        "MITRE",
+        lambda m, f: f["mitre_mapping"][0].get("technique_name", "")
+        if f["mitre_mapping"]
+        else "",
+        "<",
+        30,
+        lambda m, f: f["mitre_mapping"][0].get("technique_name", "")
+        if f["mitre_mapping"]
+        else "",
+        False,
+    ),
+    (
+        "ANCESTORS",
+        lambda m, f: "/".join(f.get("ancestors", None) or []),
+        "<",
+        30,
+        lambda m, f: "/".join(f.get("ancestors", None) or []),
+        False,
+    ),
+    (
         "Description",
         lambda m, f: f["description"],
         "<",
@@ -438,5 +551,6 @@ LISTENING_SOCKET_COLUMNS = [
         lambda m, l: f'{l["local_ip"]}:{l["local_port"]}',
         True,
     ),
+    ("PUID", lambda m, l: l["puid"], "<", 20, lambda m, l: l["puid"], False),
     ("PROCESS", lambda m, l: l["proc_name"], "<", 0, lambda m, l: l["proc_name"], True),
 ]

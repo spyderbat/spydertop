@@ -34,7 +34,7 @@ class HelpFrame(Frame):
             FuncLabel(
                 lambda: add_palette(
                     """\
-${{{label},1}}spydertop 0.1.0 - (C) 2022 Spyderbat
+${{{label},1}}spydertop 0.2.1 - (C) 2022 Spyderbat
 ${{{label},1}}Styled after htop.
 
 CPU usage bar: ${{{borders},1}}[${{4,1}}low-priority/${{2}}normal/${{1}}kernel/${{6}}virtualized            ${{{background},1}}used%${{{borders},1}}]
@@ -57,19 +57,20 @@ Process Status: R: running; S: sleeping; T: traced/stopped; Z: zombie; D: disk s
             FuncLabel(
                 lambda: add_palette(
                     """\
-${{{label},1}}  Arrows:${{{background}}} scroll record list
-${{{label},1}}S-Arrows:${{{background}}} scroll faster
-${{{label},1}}Home/End:${{{background}}} jump to list top/bottom
-${{{label},1}} PgUp/Dn:${{{background}}} jump one page up/down
-${{{label},1}}   Enter:${{{background}}} Show full record details
-${{{label},1}}       H:${{{background}}} show/hide threads
-${{{label},1}}       K:${{{background}}} show/hide kernel threads
-${{{label},1}}       I:${{{background}}} toggle sorting direction
-${{{label},1}}       p:${{{background}}} Switch to processes tab
-${{{label},1}}       f:${{{background}}} Switch to flags tab
-${{{label},1}}       s:${{{background}}} Switch to sessions tab
-${{{label},1}}       c:${{{background}}} Switch to connections tab
-${{{label},1}}       l:${{{background}}} Switch to listening tab\
+${{{label},1}}   Arrows:${{{background}}} scroll record list
+${{{label},1}} S-Arrows:${{{background}}} scroll faster
+${{{label},1}} Home/End:${{{background}}} jump to list top/bottom
+${{{label},1}}  PgUp/Dn:${{{background}}} jump one page up/down
+${{{label},1}}    Enter:${{{background}}} Show full record details
+${{{label},1}}Tab/S-Tab:${{{background}}} Move to the next/previous tab
+${{{label},1}}        H:${{{background}}} show/hide threads
+${{{label},1}}        K:${{{background}}} show/hide kernel threads
+${{{label},1}}        I:${{{background}}} toggle sorting direction
+${{{label},1}}        p:${{{background}}} Switch to processes tab
+${{{label},1}}        f:${{{background}}} Switch to flags tab
+${{{label},1}}        s:${{{background}}} Switch to sessions tab
+${{{label},1}}        c:${{{background}}} Switch to connections tab
+${{{label},1}}        l:${{{background}}} Switch to listening tab\
 """,
                     model,
                 ),
@@ -92,6 +93,7 @@ ${{{label},1}}  F6 > .:${{{background}}} select a column to sort by
 ${{{label},1}}      F7:${{{background}}} show time selection menu
 ${{{label},1}}F9 Space:${{{background}}} play
 ${{{label},1}} F10 q Q:${{{background}}} quit
+${{{label},1}}       F:${{{background}}} cursor follows record
 ${{{label},1}}   + - =:${{{background}}} expand/collapse tree
 ${{{label},1}}       *:${{{background}}} fully expand/collapse tree
 ${{{label},1}}     [ ]:${{{background}}} move forward/backward 1 sec
@@ -111,21 +113,29 @@ ${{{label},1}}     {{ }}:${{{background}}} move forward/backward 1 min\
             FuncLabel(
                 lambda: add_palette(
                     """
-Current time is listed in the bottom-right corner. ${{{label},1}}\
-Play${{{background},0}} will start time moving based on the play speed setting. \
-${{{label},1}}Time${{{background},0}} will switch to a relative time selection menu. \
+Current time is listed in the bottom-right corner. ${{{button},1,{button_bg}}}\
+Play${{{label},0,-1}} will start time moving based on the play speed setting. \
+${{{button},1,{button_bg}}}Time${{{label},0,-1}} will switch to a relative time selection menu. \
 The custom time input \
 allows you to input a time in a similar format to the command line arguments. \
 These can have an optional unit at the end. Accepted units are s: seconds, \
-m: minutes, h: hours, d: days, y: years. Default is seconds. For example:
+m: minutes, h: hours, d: days, y: years. Default is seconds. For example, \
+to move 5 and a half days backward, you would enter:
 
-Custom: -5.5d    -- 5 and a half days backward
+Custom: ${{{label}, 1}}-5.5d${{{label}}}
 
 When changing time to a period which has not yet been loaded, the application \
 will attempt to load those records from the specified input. This often takes \
 a few seconds. In the case that a file was provided for input, all records are \
 loaded in the initial load process. If the application moves to a time which is \
-unloaded, ${{1,1}}No Data${{{background},0}} will be shown.\
+unloaded, ${{1,1}}No Data${{{label},0}} will be shown.
+
+Filter and search support filtering by column, negating filters with !, and will \
+compare numerical values for \
+each column. For example, to match non-root processes taking more than 100MB of \
+memory and that have 'opt' in their name, you would use:
+
+Filter: ${{{label}, 1}}user: !root res:>100e6 opt${{{label}}}\
 """,
                     model,
                 ),

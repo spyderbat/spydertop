@@ -16,13 +16,7 @@
 from setuptools import setup
 
 NAME = "spydertop"
-VERSION = "0.2.0"
-# To install the library, run the following
-#
-# python setup.py install
-#
-# prerequisite: setuptools
-# http://pypi.python.org/pypi/setuptools
+VERSION = "0.2.1"
 
 REQUIRES = ["asciimatics", "click", "spyderbat-api", "pyyaml"]
 
@@ -31,8 +25,8 @@ setup(
     version=VERSION,
     description="Historical TOP Tool",
     author="Griffith Thomas",
-    author_email="kiranwells1008@gmail.com",
-    url="",
+    author_email="dev@spyderbat.com",
+    url="https://github.com/spyderbat/spydertop",
     keywords=["spydertop", "Spyderbat API UI & Public APIs"],
     python_requires=">=3.6",
     install_requires=REQUIRES,
