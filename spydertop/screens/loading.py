@@ -9,13 +9,48 @@
 A loading screen to show progress toward loading a set of records
 """
 
+import re
 from asciimatics.screen import Screen
 from asciimatics.widgets import Frame, Layout, Label
 from asciimatics.exceptions import NextScene
 from asciimatics.event import KeyboardEvent
 from spydertop.model import AppModel
 
-from spydertop.widgets import Padding, FuncLabel
+from spydertop.utils import COLOR_REGEX, ExtendedParser
+from spydertop.widgets import FuncLabel
+
+LOGO = """\
+${4}        ▂▄▅▆${0,2,4}▂▂▃▃▂${4,2,-1}▇▆▅▄▂        
+${4}     ▂▅${0,2,4}▂▄▆${4,2,-1}      ▄${0,2,4} ${4,2,-1}▌ ${0,2,4}▆▄▂${4,2,-1}▅▂     
+${4}   ▗▆${0,2,4}▃${4,2,-1}        ▗${0,2,4}▘   ${4,2,-1}▄▃▁  ${0,2,4}▃${4,2,-1}▆▖   
+  ${0,2,4}▘▗${4,2,-1}▘       ▃${0,2,4}▘       ${4,2,-1}▘   ▝${0,2,4}▖▝${4,2,-1}  
+ ${0,2,4}▘▗${4,2,-1}       ▃▆${0,2,4}        ${4,2,-1}▊      ${0,2,4}▖▝${4,2,-1} 
+${0,2,4}▌ ${4,2,-1}      ▄${0,2,4}           ${4,2,-1}▋       ${0,2,4} ${4,2,-1}▌
+${0,2,4} ${4,2,-1}▌      ${0,2,4}▅            ${4,2,-1}▖      ${0,2,4}▌ ${4,2,-1}
+${0,2,4} ${4,2,-1}▍        ${0,2,4}▅          ▅${4,2,-1}      ${0,2,4}▋ ${4,2,-1}
+${0,2,4} ${4,2,-1}▌          ${0,2,4}▅        ${4,2,-1}       ${0,2,4}▌ ${4,2,-1}
+${0,2,4}▌ ${4,2,-1}        ▖  ${0,2,4}▍        ${4,2,-1}▃     ${0,2,4} ${4,2,-1}▌
+ ${0,2,4}▖▝${4,2,-1}      ${0,2,4}▊ ▝${4,2,-1}▃${0,2,4}          ${4,2,-1}▅▖  ${0,2,4}▘▗${4,2,-1} 
+  ${0,2,4}▖▝${4,2,-1}▖ ▗▄${0,2,4}                 ▝▘▗${4,2,-1}  
+${4}   ▝${0,1,4}▂${4,2,-1}▅ ${0,2,4}▅▄▄▄▃▃▃▂           ${4,2,-1}▘   
+     ${0,2,4}▆▃${4,2,-1}▆▄▂        ${0,2,4}▆▅╾╴ ▃▆${4,2,-1}     
+        ${0,2,4}▆▄▃▂${4,2,-1}▆▆▅▅▆▆${0,2,4}▂▃▄▆${4,2,-1}        
+"""
+
+BIG_NAME = """\
+${8}░${4}█▀▀${8}░${4}█▀█${8}░${4}█${8}░${4}█${8}░${4}█▀▄${8}░${4}█▀▀${8}░${4}█▀▄${8}░${4}▀█▀${8}░${4}█▀█${8}░${4}█▀█
+${8}░${4}▀▀█${8}░${4}█▀▀${8}░░${4}█${8}░░${4}█${8}░${4}█${8}░${4}█▀▀${8}░${4}█▀▄${8}░░${4}█${8}░░${4}█${8}░${4}█${8}░${4}█▀▀
+${8}░${4}▀▀▀${8}░${4}▀${8}░░░░${4}▀${8}░░${4}▀▀${8}░░${4}▀▀▀${8}░${4}▀${8}░${4}▀${8}░░${4}▀${8}░░${4}▀▀▀${8}░${4}▀${8}░░
+"""
+
+HUGE_NAME = """\
+${4}███████${8}╗${4}██████${8}╗ ${4}██${8}╗   ${4}██${8}╗${4}██████${8}╗ ${4}███████${8}╗${4}██████${8}╗ ${4}████████${8}╗ ${4}██████${8}╗ ${4}██████${8}╗ 
+${4}██${8}╔════╝${4}██${8}╔══${4}██${8}╗╚${4}██${8}╗ ${4}██${8}╔╝${4}██${8}╔══${4}██${8}╗${4}██${8}╔════╝${4}██${8}╔══${4}██${8}╗╚══${4}██${8}╔══╝${4}██${8}╔═══${4}██${8}╗${4}██${8}╔══${4}██${8}╗
+${4}███████${8}╗${4}██████${8}╔╝ ╚${4}████${8}╔╝ ${4}██${8}║  ${4}██${8}║${4}█████${8}╗  ${4}██████${8}╔╝   ${4}██${8}║   ${4}██${8}║   ${4}██${8}║${4}██████${8}╔╝
+${8}╚════${4}██${8}║${4}██${8}╔═══╝   ╚${4}██${8}╔╝  ${4}██${8}║  ${4}██${8}║${4}██${8}╔══╝  ${4}██${8}╔══${4}██${8}╗   ${4}██${8}║   ${4}██${8}║   ${4}██${8}║${4}██${8}╔═══╝ 
+${4}███████${8}║${4}██${8}║        ${4}██${8}║   ${4}██████${8}╔╝${4}███████${8}╗${4}██${8}║  ${4}██${8}║   ${4}██${8}║   ╚${4}██████${8}╔╝${4}██${8}║     
+${8}╚══════╝╚═╝        ╚═╝   ╚═════╝ ╚══════╝╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝     
+"""
 
 
 class LoadingFrame(Frame):
@@ -38,21 +73,66 @@ class LoadingFrame(Frame):
         layout = Layout([1], fill_frame=True)
         self.add_layout(layout)
 
-        layout.add_widget(Padding((screen.height - 1) // 2))
-        self._label = Label("", align="^")
+        layout.add_widget(
+            FuncLabel(
+                self.update_logo,
+                align="^",
+                parser=ExtendedParser(),
+                drop_whitespace=False,
+            )
+        )
+
+        def update_bar():
+            # update the label
+            max_bars = int(self.screen.width / 3)
+            bars = int(self._model.progress * max_bars)
+            return (
+                "${-1}Loading: ${8}[${4}"
+                + ("|" * bars)
+                + (" " * (max_bars - bars))
+                + f"${{8}}]${{-1}} {round(self._model.progress*100,1):>5}%"
+            )
+
+        self._label = FuncLabel(update_bar, align="^", parser=ExtendedParser())
         layout.add_widget(self._label)
         layout.add_widget(
             FuncLabel(
-                lambda: "Loading time " + str(model.time)
+                lambda: "${8,1}Loading time " + str(model.time)
                 if model.time is not None
-                else "Loading ... ",
+                else "${8,1}Loading from " + model.config.input.name
+                if not isinstance(model.config.input, str)
+                else "${8,1}Loading from " + model.config.input,
                 align="^",
+                parser=ExtendedParser(),
             )
         )
-        layout.add_widget(FuncLabel(lambda: model.state, align="^"))
 
         self.set_theme(self._model.config["theme"])
         self.fix()
+
+    def update_logo(self):
+        """Update the logo"""
+        if self.screen.width < 80:
+            header_padding = max(round(self.screen.height / 2 - 13), 0)
+            return ("\n" * header_padding) + LOGO + "\n" + BIG_NAME
+        if self.screen.width < 110:
+            header_padding = max(round(self.screen.height / 2 - 15), 0)
+            return ("\n" * header_padding) + LOGO + "\n" + HUGE_NAME
+        else:
+            header_padding = max(round(self.screen.height / 2 - 9), 0)
+            name_len = len(
+                re.sub(COLOR_REGEX, "", HUGE_NAME.split("\n", maxsplit=1)[0])
+            )
+            padding = (" " * name_len + "\n") * 5
+            extended_huge_name = padding + HUGE_NAME + padding
+            return ("\n" * header_padding) + "\n".join(
+                [
+                    logoline + " " + nameline
+                    for logoline, nameline in zip(
+                        LOGO.split("\n"), extended_huge_name.split("\n")
+                    )
+                ]
+            )
 
     def update(self, frame_no):
         self.set_theme(self._model.config["theme"])
@@ -65,15 +145,7 @@ class LoadingFrame(Frame):
             self._model.thread.join()
             self._quit()
         else:
-            # update the label
-            max_bars = int(self.screen.width / 3)
-            bars = int(self._model.progress * max_bars)
-            self._label.text = (
-                "Loading: ["
-                + ("|" * bars)
-                + (" " * (max_bars - bars))
-                + f"] {round(self._model.progress*100,1):>5}%"
-            )
+            pass
         super().update(frame_no)
 
     def process_event(self, event):

@@ -16,15 +16,20 @@ import gzip
 from math import nan
 from datetime import datetime, timedelta
 from typing import Callable, Dict, NewType, Optional, Set, List, Any, Tuple, Union
+import uuid
 
 import spyderbat_api
-from spyderbat_api.api import source_data_api, org_api, source_api
+from spyderbat_api.api import (
+    source_data_api,
+    org_api,
+    source_api,
+)
 import urllib3
 from urllib3.exceptions import MaxRetryError
 
 from spydertop.config import Config
 from spydertop.cursorlist import CursorList
-from spydertop.utils import TimeSpanTracker, log
+from spydertop.utils import API_LOG_TYPES, TimeSpanTracker, log
 
 # custom types for data held in the model
 Tree = NewType("Tree", Dict[str, Tuple[bool, Optional["Tree"]]])
@@ -61,6 +66,8 @@ class AppModel:
     _time_elapsed: float = 0
     _last_good_timestamp: float = None
     _time_span_tracker: TimeSpanTracker = TimeSpanTracker()
+    _session_id: str
+    _http_client: urllib3.PoolManager
 
     _records: Dict[str, Dict[str, Record]] = {
         "model_process": {},
@@ -79,6 +86,8 @@ class AppModel:
     def __init__(self, config: Config) -> None:
         self.config = config
         self._timestamp = None
+        self._session_id = uuid.uuid4().hex
+        self._http_client = urllib3.PoolManager()
 
         self._tops = CursorList("time", [], self._timestamp)
 
@@ -170,6 +179,15 @@ class AppModel:
                     org_uid=self.config.org, dt="htop", **input_data
                 )
                 lines += api_response.split("\n")
+                self.log_api(
+                    API_LOG_TYPES["loaded_data"],
+                    {
+                        "count": len(lines),
+                        "source_id": input_data["src"],
+                        "start_time": input_data["st"],
+                        "end_time": input_data["et"],
+                    },
+                )
             except spyderbat_api.ApiException as exc:
                 self.fail(f"Loading data from the api failed with reason: {exc.reason}")
                 log.traceback(exc)
@@ -216,6 +234,9 @@ Debug info:
 No more records can be loaded."
                 )
                 return
+            self.log_api(
+                API_LOG_TYPES["loaded_data"], {"source_id": "file", "count": len(lines)}
+            )
 
         if self.config.output:
             self.config.output.write("\n".join([l.rstrip() for l in lines]))
@@ -389,6 +410,7 @@ not enough information could be loaded.\
         try:
             orgs = api_instance.org_list(_preload_content=False)
             orgs = json.loads(orgs.data)
+            self.log_api(API_LOG_TYPES["orgs"], {"count": len(orgs)})
             return orgs
         except spyderbat_api.ApiException as exc:
             self.fail(f"Exception when calling OrgApi: {exc.status} - {exc.reason}")
@@ -425,7 +447,8 @@ not enough information could be loaded.\
                 _preload_content=False,
                 **kwargs,
             )
-            sources: Any = json.loads(sources.data)
+            sources: List = json.loads(sources.data)
+            self.log_api(API_LOG_TYPES["sources"], {"count": len(sources)})
 
             return sources
         except Exception as exc:  # pylint: disable=broad-except
@@ -433,24 +456,28 @@ not enough information could be loaded.\
             log.traceback(exc)
             return None
 
-    def log_api(self, data: Dict[str, Any]) -> None:
+    def log_api(self, name: str, data: Dict[str, Any]) -> None:
         """Send logs to the spyderbat internal logging API"""
-        if self.config.api_key is None:
-            raise Exception("Cannot log without an API key")
-
-        http_handler = urllib3.PoolManager()
+        new_data = {
+            "name": name,
+            "application": "spydertop",
+            "orgId": self.config.org,
+            "session_id": self._session_id,
+            **data,
+        }
 
         try:
-            data["source"] = "spydertop"
+            headers = {
+                "Content-Type": "application/json",
+            }
+            if self.config.api_key is not None:
+                headers["Authorization"] = f"Bearer {self.config.api_key}"
             # send the data to the API
-            response = http_handler.request(
+            response = self._http_client.request(
                 "POST",
                 f"{self.config.input}/api/v1/_/log",
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.config.api_key}",
-                },
-                body=json.dumps(data),
+                headers=headers,
+                body=json.dumps(new_data),
             )
             # check the response
             if response.status != 200:
@@ -461,6 +488,11 @@ not enough information could be loaded.\
         except Exception as exc:  # pylint: disable=broad-except
             log.debug("Exception when logging to API")
             log.traceback(exc)
+
+    def submit_feedback(self, feedback: str) -> None:
+        """Submit feedback to the spyderbat internal logging API"""
+        self.log_api(API_LOG_TYPES["feedback"], {"message": feedback})
+        self.config["has_submitted_feedback"] = True
 
     def get_value(self, key, previous=False) -> Any:
         """Provides the specified field on the most recent or the previous
@@ -590,7 +622,8 @@ not enough information could be loaded.\
 
     def tops_valid(self) -> bool:
         """Return whether the event top data is valid for this time"""
-        grace_period = 5
+        # the slowest data should appear is once per 15 seconds
+        grace_period = 16
         return (
             self._tops.is_valid(0)
             and self._tops.is_valid(-1)
@@ -622,6 +655,33 @@ not enough information could be loaded.\
             )
         )
 
+    def clear(self) -> None:
+        """Remove all loaded data from the model"""
+        self._timestamp = None
+        self._time_elapsed = 0
+        self._last_good_timestamp = None
+        self._time_span_tracker = TimeSpanTracker()
+
+        self._records = {
+            "model_process": {},
+            "model_session": {},
+            "model_connection": {},
+            "model_machine": {},
+            "model_listening_socket": {},
+            "event_redflag": {},
+        }
+        self._tree = None
+        self._top_ids = set()
+        self._tops = CursorList("time", [], self._timestamp)
+        self._machine = None
+        self._meminfo = None
+
+        self.loaded = False
+        self.failed = False
+        self.failure_reason = ""
+        self.progress = 0
+        self.columns_changed = False
+
     @property
     def state(self) -> str:
         """The current status of the model"""
@@ -635,7 +695,9 @@ not enough information could be loaded.\
     @property
     def time_elapsed(self) -> float:
         """The time elapsed between the last event_top_data record and the current one"""
-        return self._time_elapsed if self._time_elapsed != 0 else nan
+        return (
+            self._time_elapsed if self._time_elapsed != 0 and self.tops_valid() else nan
+        )
 
     @property
     def memory(self) -> Dict[str, int]:

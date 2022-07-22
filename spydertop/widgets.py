@@ -197,7 +197,7 @@ class Padding(Widget):
 
     def __init__(self, height=1):
         super().__init__(None, tab_stop=False)
-        self._height = height
+        self.height = height
 
     def process_event(self, event):
         return event
@@ -210,6 +210,15 @@ class Padding(Widget):
 
     def update(self, frame_no):
         pass
+
+    @property
+    def height(self):
+        """The height of the padding, in lines."""
+        return self._height
+
+    @height.setter
+    def height(self, height):
+        self._height = max(round(height), 0)
 
     @property
     def value(self):
@@ -237,6 +246,7 @@ class FuncLabel(Widget):
         name=None,
         color="label",
         indent="",
+        **kwargs,
     ):
         """
         :param generator: a function which generates the text to display on screen.
@@ -252,6 +262,7 @@ class FuncLabel(Widget):
         self.parser = parser
         self.color = color
         self.indent = indent
+        self.wrapper_kwargs = kwargs
 
     def process_event(self, event):
         return event
@@ -262,7 +273,9 @@ class FuncLabel(Widget):
     def required_height(self, offset, width):
         text = self.generator()
         height = 0
-        wrapper = CustomTextWrapper(width=width, subsequent_indent=self.indent)
+        wrapper = CustomTextWrapper(
+            width=width, subsequent_indent=self.indent, **self.wrapper_kwargs
+        )
         for para in text.split("\n"):
             if para == "":
                 height += 1
@@ -273,7 +286,9 @@ class FuncLabel(Widget):
     def update(self, frame_no):
         (color, attr, background) = self._frame.palette[self.color]
         text = self.generator()
-        wrapper = CustomTextWrapper(width=self._w, subsequent_indent=self.indent)
+        wrapper = CustomTextWrapper(
+            width=self._w, subsequent_indent=self.indent, **self.wrapper_kwargs
+        )
 
         offset = 0
         for para in text.split("\n"):

@@ -42,10 +42,14 @@ class FailureFrame(Frame):
         layout = Layout([1])
         self.add_layout(layout)
 
-        layout.add_widget(Padding((screen.height - 1) // 2 - 3))
+        layout.add_widget(Padding((screen.height - 1) // 2 - 5))
         layout.add_widget(
             FuncLabel(
-                lambda: "${1,1}Data failed to load:",
+                lambda: """\
+ ${1,1}⡇⢸ ⣇⡀ ⢀⡀ ⢀⡀ ⣀⡀ ⢀⣀ ⡇
+ ${1,1}⠟⠻ ⠇⠸ ⠣⠜ ⠣⠜ ⡧⠜ ⠭⠕ ⠅
+ 
+ Something went wrong, and I can't fix it:""",
                 align="^",
                 parser=ExtendedParser(),
             )

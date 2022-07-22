@@ -73,7 +73,9 @@ class Table(Widget):
                     self.value = i
                     break
         else:
-            if len(self._filtered_rows) > 0:
+            if len(self._filtered_rows) > 0 and 0 <= self.value < len(
+                self._filtered_rows
+            ):
                 self._set_state(id_to_follow=self._filtered_rows[self.value][1][0])
 
         # validate the selected row
@@ -339,23 +341,29 @@ class Table(Widget):
                     if row[1][index] is None:
                         return False
                     if column_match[1][0] == "<":
-                        return row[1][index] < float(column_match[1][1:])
-                    else:
-                        return row[1][index] > float(column_match[1][1:])
-                if column_match[1][0] == "!" and column_match[1][1:] in row[0][index]:
+                        if row[1][index] >= float(column_match[1][1:]):
+                            return False
+                    elif row[1][index] <= float(column_match[1][1:]):
+                        return False
+                elif column_match[1][0] == "!" and column_match[1][1:] in row[0][index]:
                     return False
-                if (column_match[1][0] != "!") and not column_match[1] in row[0][index]:
+                elif (column_match[1][0] != "!") and not column_match[1] in row[0][
+                    index
+                ]:
                     return False
             except ValueError:
                 pass
-        return rest in " ".join([str(_) for _ in row[0]])
+        combined = " ".join([str(_) for _ in row[0]])
+        if len(rest) > 0 and rest[0] == "!":
+            return rest[1:] not in combined
+        return rest in combined
 
     def _parse_filter(self, value: str) -> List[Tuple[str, str]]:
         """
         Parse a filter string into a list of tuples of the form (column, value).
         """
         column_matches = []
-        match_regex = r"\s*(\S+): ?(\S+)"
+        match_regex = re.compile(r"\s*(\S+): ?(\S+)( +|$)")
         match = re.match(match_regex, value)
         while match:
             column_matches.append((match.group(1), match.group(2)))
@@ -377,9 +385,6 @@ class Table(Widget):
 
     def find(self, search: str):
         """Finds the first row that contains the given search string."""
-        # searchable_rows = [
-        #     " ".join([str(_) for _ in row[0]]) for row in self._filtered_rows
-        # ]
         column_matches, rest = self._parse_filter(search)
         for i, row in enumerate(self._filtered_rows):
             if self._filter_predicate(row, column_matches, rest):

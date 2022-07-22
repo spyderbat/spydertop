@@ -13,7 +13,7 @@ import re
 from typing import Callable, Optional
 from asciimatics.widgets import Frame, Text, Layout, Widget
 from asciimatics.screen import Screen
-from asciimatics.event import KeyboardEvent
+from asciimatics.event import KeyboardEvent, MouseEvent
 from spydertop.utils import COLOR_REGEX, ExtendedParser
 
 from spydertop.widgets import FuncLabel
@@ -151,6 +151,8 @@ class NotificationModal(Frame):
             ):
                 self._scene.remove_effect(self)
                 return
+        if isinstance(event, MouseEvent):
+            self._scene.remove_effect(self)
         return self._parent.process_event(event)
 
     @property

@@ -67,6 +67,7 @@ class Config:
         "collapse_tree": False,
         "follow_record": False,
         "theme": "htop",
+        "has_submitted_feedback": False,
     }
     settings_changed: bool = False
 
@@ -93,9 +94,6 @@ class Config:
             self.has_config_file = True
         except FileNotFoundError:
             config_default = {}
-            # raise click.ClickException(
-            #     "Failed to parse config: $HOME/.spyderbat-api/config.yaml does not exist"
-            # )
         except yaml.YAMLError as exc:
             raise click.ClickException("Failed to parse config: \n" + str(exc)) from exc
         except KeyError as exc:

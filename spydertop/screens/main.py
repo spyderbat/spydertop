@@ -21,7 +21,7 @@ from asciimatics.widgets import (
     Button,
     ListBox,
 )
-from asciimatics.exceptions import NextScene, StopApplication
+from asciimatics.exceptions import NextScene
 from asciimatics.event import KeyboardEvent
 from asciimatics.strings import ColouredText
 
@@ -40,6 +40,7 @@ from spydertop.screens.meters import (
 from spydertop.screens.modals import InputModal, NotificationModal
 from spydertop.table import Table
 from spydertop.utils import (
+    API_LOG_TYPES,
     BetterDefaultDict,
     ExtendedParser,
     log,
@@ -216,7 +217,6 @@ class MainFrame(Frame):
 
         self._columns = Table(self._model, self._model.tree)
         self._main.add_widget(self._columns)
-        # self._main.add_widget(Padding())
 
         ################# Footer #######################
 
@@ -232,7 +232,7 @@ class MainFrame(Frame):
 
         self.reset()
         self.fix()
-        self._switch_to_tab(self._state["tab"])
+        self._switch_to_tab(self._state["tab"], force=True)
         self.switch_focus(self._main, 0, 0)
         self._widgets_initialized = True
 
@@ -280,12 +280,12 @@ class MainFrame(Frame):
                         )
                 self.needs_screen_refresh = True
 
-            if conf["play"] != self._old_settings["play"]:
-                self._footer.change_button_text(
-                    8, "Play" if not self._model.config["play"] else "Pause"
-                )
-                self.fix()
-                self.needs_screen_refresh = True
+            self._footer.change_button_text(
+                "Play" if self._model.config["play"] else "Pause",
+                "Play" if not self._model.config["play"] else "Pause",
+            )
+            self.fix()
+            self.needs_screen_refresh = True
             if (
                 conf["hide_threads"] != self._old_settings["hide_threads"]
                 or conf["hide_kthreads"] != self._old_settings["hide_kthreads"]
@@ -598,8 +598,8 @@ class MainFrame(Frame):
             ("Tree", lambda: self._config("tree")),
             ("SortBy", self._show_sort_menu),
             ("Time", lambda: self._switch_buttons("time")),
-            ("", lambda: None),
             ("Play", self._play),
+            ("Back", self._back),
             ("Quit", self._quit),
         ]
 
@@ -640,9 +640,8 @@ class MainFrame(Frame):
 
         self.fix()
 
-    def _switch_to_tab(self, tab_name):
+    def _switch_to_tab(self, tab_name: str, force: bool = False):
         """Switch to the given tab, and update the state accordingly"""
-        # update state
 
         # update tabs colors
         for button in self._tabs:
@@ -658,7 +657,8 @@ class MainFrame(Frame):
                 )
         self.needs_screen_refresh = True
 
-        if tab_name == self._state["tab"]:
+        # update state
+        if tab_name == self._state["tab"] and not force:
             return
         self._set_state(tab=tab_name)
         self._columns.value = 0
@@ -667,6 +667,8 @@ class MainFrame(Frame):
         self._model.config["filter"] = None
         self._cached_options = None
         self._cached_sortable = None
+
+        self._model.log_api(API_LOG_TYPES["navigation"], {"tab": tab_name})
 
         # update columns and sort
         if tab_name == "processes":
@@ -699,6 +701,7 @@ class MainFrame(Frame):
 
     def _show_sort_menu(self):
         """show the sort menu"""
+        self._model.log_api(API_LOG_TYPES["navigation"], {"menu": "sort"})
 
         def set_sort(title):
             log.info(f"Switching sort to: {title}")
@@ -718,6 +721,7 @@ class MainFrame(Frame):
 
     def _show_search(self):
         """show the search input modal"""
+        self._model.log_api(API_LOG_TYPES["navigation"], {"menu": "search"})
         self._switch_buttons("modal")
 
         def run_search(value):
@@ -738,6 +742,7 @@ class MainFrame(Frame):
 
     def _show_time_entry(self):
         """Show a modal to enter a time offset"""
+        self._model.log_api(API_LOG_TYPES["navigation"], {"menu": "time"})
         self._switch_buttons("modal")
 
         def validator(val):
@@ -760,6 +765,7 @@ class MainFrame(Frame):
 
     def _show_filter(self):
         """Show a filter menu"""
+        self._model.log_api(API_LOG_TYPES["navigation"], {"menu": "filter"})
         self._switch_buttons("modal")
 
         def set_filter(value):
@@ -807,14 +813,21 @@ class MainFrame(Frame):
 
     def _show_setup(self):
         """Show the setup screen"""
+        self._model.log_api(API_LOG_TYPES["navigation"], {"menu": "setup"})
         self._scene.add_effect(SetupFrame(self.screen, self._model))
 
     def _play(self):
         """Update the model to play"""
+        self._model.log_api(API_LOG_TYPES["navigation"], {"button": "play"})
         self._model.config["play"] = not self._model.config["play"]
 
     def _shift_time(self, offset: float):
         """Shift the time in Model by a given amount."""
+        # the minimum offset should be to the next top time
+        min_offset = (
+            self._model.time_elapsed if self._model.time_elapsed is not nan else 1
+        )
+        offset = max(min_offset, abs(offset)) * (1 if offset > 0 else -1)
         self._model.timestamp += offset
 
         if not self._model.tops_valid() and self._model.loaded:
@@ -836,17 +849,17 @@ Some information displayed may not be accurate\
             self._scene.add_effect(
                 NotificationModal(
                     self.screen,
-                    f"Moved {pretty_time(abs(offset))} {direction}",
+                    f"Moved {pretty_time(abs(round(offset)))} {direction}",
                     self,
                     frames=15,
                 )
             )
 
+        self.needs_recalculate = True
+
         # load new data, if necessary
         if not self._model.loaded:
             raise NextScene("Loading")
-
-        self.needs_recalculate = True
 
     def _config(self, name: str, value=None):
         """Change a config value, and handle any effects"""
@@ -874,13 +887,24 @@ Some information displayed may not be accurate\
         return actual_widths
 
     # -- moving to other frames -- #
-    @staticmethod
-    def _help():
+    def _back(self):
+        """Move back to configuring sources"""
+        self._model.log_api(API_LOG_TYPES["navigation"], {"button": "back"})
+        self._model.config.source_confirmed = False
+        self._model.config.start_time = None
+        self._model.config["play"] = False
+        self._switch_to_tab("processes")
+        raise NextScene("Config")
+
+    def _help(self):
+        """Show the help screen"""
+        self._model.log_api(API_LOG_TYPES["navigation"], {"button": "help"})
         raise NextScene("Help")
 
-    @staticmethod
-    def _quit():
-        raise StopApplication("User quit")
+    def _quit(self):
+        """Quit the program"""
+        self._model.log_api(API_LOG_TYPES["navigation"], {"button": "quit"})
+        raise NextScene("Quit")
 
     @property
     def frame_update_count(self):

@@ -10,12 +10,12 @@ The help screen, shown when F1 is pressed
 """
 
 from asciimatics.screen import Screen
-from asciimatics.widgets import Frame, Layout
+from asciimatics.widgets import Frame, Layout, Button
 from asciimatics.exceptions import NextScene
 from asciimatics.event import KeyboardEvent
 
 from spydertop.model import AppModel
-from spydertop.widgets import FuncLabel
+from spydertop.widgets import FuncLabel, Padding
 from spydertop.utils import ExtendedParser, add_palette
 
 
@@ -28,15 +28,40 @@ class HelpFrame(Frame):
         # pylint: disable=line-too-long
         super().__init__(screen, screen.height, screen.width, reduce_cpu=True)
 
+        header = Layout([1, 1])
+        self.add_layout(header)
+        header.add_widget(Button("Back", self._quit))
+        header.add_widget(Button("Support and Feedback", self._support_and_feedback), 1)
+        header.add_widget(Padding())
+        header.add_widget(Padding(), 1)
+        header.add_widget(
+            FuncLabel(
+                lambda: """\
+ ⣇⣸ ⢀⡀ ⡇ ⣀⡀
+ ⠇⠸ ⠣⠭ ⠣ ⡧⠜
+""",
+            )
+        )
+        header.add_widget(
+            FuncLabel(
+                lambda: add_palette(
+                    """\
+${{{label},1}}spydertop 0.3.0 - (C) 2022 Spyderbat
+${{{label},1}}Styled after htop.\
+""",
+                    model,
+                ),
+                parser=ExtendedParser(),
+            ),
+            1,
+        )
+
         single_column = Layout([1])
         self.add_layout(single_column)
         single_column.add_widget(
             FuncLabel(
                 lambda: add_palette(
                     """\
-${{{label},1}}spydertop 0.2.1 - (C) 2022 Spyderbat
-${{{label},1}}Styled after htop.
-
 CPU usage bar: ${{{borders},1}}[${{4,1}}low-priority/${{2}}normal/${{1}}kernel/${{6}}virtualized            ${{{background},1}}used%${{{borders},1}}]
 Memory bar:    ${{{borders},1}}[${{2}}used/${{4,1}}buffers/${{5}}shared/${{3}}cache                    ${{{background},1}}used/total${{{borders},1}}]
 Swap bar:      ${{{borders},1}}[${{1}}used/${{3}}cache                                   ${{{background},1}}used/total${{{borders},1}}]
@@ -140,9 +165,11 @@ Filter: ${{{label}, 1}}user: !root res:>100e6 opt${{{label}}}\
                     model,
                 ),
                 parser=ExtendedParser(),
-                align="^",
+                align="<",
             )
         )
+
+        single_column2.add_widget(Padding())
 
         self._model = model
         self.set_theme(model.config["theme"])
@@ -155,5 +182,12 @@ Filter: ${{{label}, 1}}user: !root res:>100e6 opt${{{label}}}\
 
     def process_event(self, event):
         # on any keyboard event, go back to Main
-        if isinstance(event, KeyboardEvent):
-            raise NextScene("Main")
+        if isinstance(event, KeyboardEvent) and event.key_code == ord("q"):
+            self._quit()
+        return super().process_event(event)
+
+    def _support_and_feedback(self):
+        raise NextScene("Feedback")
+
+    def _quit(self):
+        raise NextScene("Main")

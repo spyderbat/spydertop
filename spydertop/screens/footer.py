@@ -60,6 +60,10 @@ class Footer(Layout):
         """Trigger a click event on the button at the given index."""
         self._on_clicks[index]()
 
-    def change_button_text(self, index, new_text):
+    def change_button_text(self, old_text, new_text):
         """Change the text of the button at the given index."""
+        try:
+            index = [b.text for b in self._buttons].index(old_text)
+        except ValueError:
+            return
         self._buttons[index].text = new_text

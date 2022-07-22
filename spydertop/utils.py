@@ -199,6 +199,17 @@ SPYDERBAT_PALETTE = {
 
 THEMES["spyderbat"] = SPYDERBAT_PALETTE
 
+API_LOG_TYPES = {
+    "startup": "SpydertopStartup",
+    "shutdown": "SpydertopShutdown",
+    "loaded_data": "SpydertopLoadedData",
+    "orgs": "SpydertopOrgsListed",
+    "sources": "SpydertopSourcesListed",
+    "feedback": "SendFeedback",
+    "navigation": "SpydertopNavigation",
+    "account_created": "SpydertopAccountCreated",
+}
+
 
 class DelayedLog:
     """
@@ -386,13 +397,18 @@ class CustomTextWrapper(TextWrapper):
                 else:
                     break
 
-            # -- from standard implementation --
-
             # The current line is full, and the next chunk is too big to
             # fit on *any* line (not just this one).
             if chunks and len(chunks[-1]) > width:
+                color_match = re.match(COLOR_REGEX, chunks[-1])
+                if color_match is not None:
+                    cur_style = color_match.group()
+                    cur_line.append(cur_style)
+                    chunks[-1] = chunks[-1][len(color_match.group()) :]
                 self._handle_long_word(chunks, cur_line, cur_len, width)
                 cur_len = sum(map(len, cur_line))
+
+            # -- from standard implementation --
 
             # If the last chunk on this line is all whitespace, drop it.
             if self.drop_whitespace and cur_line and cur_line[-1].strip() == "":

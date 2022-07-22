@@ -179,8 +179,18 @@ def show_ld_avg(model: AppModel):
     """Generates the string for the load average meter"""
     ld_avg = model.get_value("load_avg")
 
-    if ld_avg is None or len(ld_avg) < 3:
+    if ld_avg is None or len(ld_avg) == 0:
         return add_palette("  ${{{meter_label}}}Load average: ${{1,1}}No Data", model)
+    if len(ld_avg) == 1:
+        return add_palette(
+            "  ${{{meter_label}}}Load average: ${{{background},1}}{ld_avg[0]}, ${{1,1}}No Data",
+            model,
+        )
+    if len(ld_avg) == 2:
+        return add_palette(
+            "  ${{{meter_label}}}Load average: ${{{background},1}}{ld_avg[0]}, ${{{meter_label},1}}{ld_avg[1]}, ${{1,1}}No Data",
+            model,
+        )
     return add_palette(
         "  ${{{meter_label}}}Load average: ${{{background},1}}{ld_avg[0]} \
 ${{{meter_label},1}}{ld_avg[1]} ${{{meter_label}}}{ld_avg[2]}",

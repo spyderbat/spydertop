@@ -10,6 +10,7 @@ The screens module contains all of the frames in the application and
 the start_screen function, which initiates the main portion of the application
 """
 
+from os import environ
 from asciimatics.screen import ManagedScreen
 from asciimatics.scene import Scene
 from asciimatics.exceptions import ResizeScreenError
@@ -21,7 +22,9 @@ from spydertop.screens.main import MainFrame
 from spydertop.screens.help import HelpFrame
 from spydertop.screens.failure import FailureFrame
 from spydertop.screens.config import ConfigurationFrame
-from spydertop.utils import log
+from spydertop.screens.feedback import FeedbackFrame
+from spydertop.screens.quit import QuitFrame
+from spydertop.utils import API_LOG_TYPES, log
 
 
 def start_screen(config: Config) -> None:
@@ -30,21 +33,20 @@ def start_screen(config: Config) -> None:
 
     last_scene = None
     model = AppModel(config)
+    model.log_api(API_LOG_TYPES["startup"], {"term": environ.get("TERM", "unknown")})
 
     while True:
         try:
             with ManagedScreen() as screen:
                 screen.play(
                     [
-                        Scene(
-                            [ConfigurationFrame(screen, model)],
-                            -1,
-                            name="Configuration",
-                        ),
+                        Scene([ConfigurationFrame(screen, model)], -1, name="Config"),
                         Scene([LoadingFrame(screen, model)], -1, name="Loading"),
                         Scene([MainFrame(screen, model)], -1, name="Main"),
                         Scene([HelpFrame(screen, model)], -1, name="Help"),
                         Scene([FailureFrame(screen, model)], -1, name="Failure"),
+                        Scene([FeedbackFrame(screen, model)], -1, name="Feedback"),
+                        Scene([QuitFrame(screen, model)], -1, name="Quit"),
                     ],
                     stop_on_resize=True,
                     start_scene=last_scene,
@@ -54,6 +56,11 @@ def start_screen(config: Config) -> None:
             # save settings which should persist across sessions
             config.dump()
             config.cleanup()
+
+            model.log_api(
+                API_LOG_TYPES["shutdown"],
+                {"failure_state": model.failure_reason if model.failed else "None"},
+            )
 
             log.info("Gracefully exiting")
             # If we get here, we have exited the screen,
