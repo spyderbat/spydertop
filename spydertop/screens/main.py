@@ -698,6 +698,7 @@ class MainFrame(Frame):
     def _show_sort_menu(self):
         """show the sort menu"""
         self._model.log_api(API_LOG_TYPES["navigation"], {"menu": "sort"})
+        self._switch_buttons("modal")
 
         def set_sort(title):
             log.info(f"Switching sort to: {title}")
@@ -712,6 +713,7 @@ class MainFrame(Frame):
             theme=self._model.config["theme"],
             height=len(self._current_columns),
             value=self._model.config["sort_column"],
+            on_death=lambda: self._switch_buttons("main"),
         )
         self._scene.add_effect(menu)
 
@@ -810,7 +812,14 @@ class MainFrame(Frame):
     def _show_setup(self):
         """Show the setup screen"""
         self._model.log_api(API_LOG_TYPES["navigation"], {"menu": "setup"})
-        self._scene.add_effect(SetupFrame(self.screen, self._model))
+        self._switch_buttons("modal")
+        self._scene.add_effect(
+            SetupFrame(
+                self.screen,
+                self._model,
+                on_death=lambda: self._switch_buttons("main"),
+            )
+        )
 
     def _play(self):
         """Update the model to play"""

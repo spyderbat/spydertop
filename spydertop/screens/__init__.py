@@ -11,6 +11,7 @@ the start_screen function, which initiates the main portion of the application
 """
 
 from os import environ
+import os
 from asciimatics.screen import ManagedScreen
 from asciimatics.scene import Scene
 from asciimatics.exceptions import ResizeScreenError
@@ -34,6 +35,9 @@ def start_screen(config: Config) -> None:
     last_scene = None
     model = AppModel(config)
     model.log_api(API_LOG_TYPES["startup"], {"term": environ.get("TERM", "unknown")})
+
+    # set delay for escape key
+    os.environ.setdefault("ESCDELAY", "10")
 
     while True:
         try:

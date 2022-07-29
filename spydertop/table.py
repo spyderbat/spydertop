@@ -45,7 +45,6 @@ class Table(Widget):
 
     _vertical_offset: int = 0
     _horizontal_offset: int = 0
-    _mouse_flip_flop = True
 
     def __init__(
         self, model: AppModel, tree: Tree, name="Table", parser=ExtendedParser()
@@ -221,9 +220,6 @@ class Table(Widget):
                 return
         if isinstance(event, MouseEvent):
             if event.buttons & event.LEFT_CLICK != 0:
-                self._mouse_flip_flop = not self._mouse_flip_flop
-                if not self._mouse_flip_flop:
-                    return event
                 this_x, this_y = self.get_location()
                 relative_x = event.x - this_x
                 relative_y = event.y - this_y

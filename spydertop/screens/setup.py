@@ -21,6 +21,7 @@ The setup frame, containing a form to select the behavior of the tool.
 #         Everything in config.settings (that fits)
 #         Color scheme
 
+from typing import Callable, Optional
 from asciimatics.screen import Screen
 from asciimatics.widgets import (
     Frame,
@@ -30,7 +31,7 @@ from asciimatics.widgets import (
     RadioButtons,
     Text,
 )
-from asciimatics.event import KeyboardEvent
+from asciimatics.event import KeyboardEvent, MouseEvent
 
 from spydertop.columns import (
     PROCESS_COLUMNS,
@@ -214,8 +215,11 @@ class SetupFrame(Frame):
     _main_column: ListBox
     _second_column: ListBox
     _has_textbox: bool = False
+    _on_death: Callable
 
-    def __init__(self, screen: Screen, model: AppModel) -> None:
+    def __init__(
+        self, screen: Screen, model: AppModel, on_death: Optional[Callable] = None
+    ) -> None:
         super().__init__(
             screen,
             max(screen.height // 2, 25),
@@ -228,6 +232,7 @@ class SetupFrame(Frame):
         self._model = model
         self._disable_change = False
         self._layout = Layout([1, 1, 3])
+        self._on_death = on_death
         self.add_layout(self._layout)
 
         ## build widgets
@@ -255,10 +260,25 @@ class SetupFrame(Frame):
 
     def process_event(self, event):
         if isinstance(event, KeyboardEvent):
-            if event.key_code == Screen.KEY_ESCAPE:
+            if (
+                event.key_code == Screen.KEY_ESCAPE
+                or event.key_code == Screen.KEY_F10
+                or (event.key_code in {ord("q"), ord("Q")} and not self._has_textbox)
+            ):
                 self._scene.remove_effect(self)
-            if event.key_code in {ord("q"), ord("Q")} and not self._has_textbox:
+                if self._on_death is not None:
+                    self._on_death()
+        elif isinstance(event, MouseEvent):
+            if (
+                self.rebase_event(event).x < 0
+                or self.rebase_event(event).x > self.canvas.width
+                or self.rebase_event(event).y < 0
+                or self.rebase_event(event).y > self.canvas.height
+            ) and (event.buttons != 0):
+                # when a click is outside the modal, close it
                 self._scene.remove_effect(self)
+                self._on_death()
+
         super().process_event(event)
         if self._model.config.settings_changed:
             self.set_theme(self._model.config["theme"])

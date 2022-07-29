@@ -46,7 +46,7 @@ class HelpFrame(Frame):
             FuncLabel(
                 lambda: add_palette(
                     """\
-${{{label},1}}spydertop 0.3.0 - (C) 2022 Spyderbat
+${{{label},1}}spydertop 0.4.0 - (C) 2022 Spyderbat
 ${{{label},1}}Styled after htop.\
 """,
                     model,
@@ -182,7 +182,9 @@ Filter: ${{{label}, 1}}user: !root res:>100e6 opt${{{label}}}\
 
     def process_event(self, event):
         # on any keyboard event, go back to Main
-        if isinstance(event, KeyboardEvent) and event.key_code == ord("q"):
+        if isinstance(event, KeyboardEvent) and (
+            event.key_code in {ord("q"), ord("Q"), Screen.KEY_F10, Screen.KEY_ESCAPE}
+        ):
             self._quit()
         return super().process_event(event)
 

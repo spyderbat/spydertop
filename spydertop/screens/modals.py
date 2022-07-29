@@ -99,6 +99,17 @@ class InputModal(Frame):
                 self._on_change(None)
                 self._scene.remove_effect(self)
                 self._on_death()
+        elif isinstance(event, MouseEvent):
+            if (
+                self.rebase_event(event).x < 0
+                or self.rebase_event(event).x > self.canvas.width
+                or self.rebase_event(event).y < 0
+                or self.rebase_event(event).y > self.canvas.height
+            ) and (event.buttons != 0):
+                # when a click is outside the modal, close it
+                self._on_change(None)
+                self._scene.remove_effect(self)
+                self._on_death()
 
         return super().process_event(event)
 
