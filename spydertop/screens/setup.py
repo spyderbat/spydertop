@@ -161,6 +161,11 @@ OPTIONS = {
                 set_config("follow_record"),
             ),
             (
+                "Use UTC Time",
+                (False, lambda model: model.config["utc_time"]),
+                set_config("utc_time"),
+            ),
+            (
                 "Play",
                 (False, lambda model: model.config["play"]),
                 set_config("play"),

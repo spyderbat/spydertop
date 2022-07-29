@@ -14,7 +14,7 @@ import threading
 import json
 import gzip
 from math import nan
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, NewType, Optional, Set, List, Any, Tuple, Union
 import uuid
 
@@ -29,7 +29,7 @@ from urllib3.exceptions import MaxRetryError
 
 from spydertop.config import Config
 from spydertop.cursorlist import CursorList
-from spydertop.utils import API_LOG_TYPES, TimeSpanTracker, log
+from spydertop.utils import API_LOG_TYPES, TimeSpanTracker, get_timezone, log
 
 # custom types for data held in the model
 Tree = NewType("Tree", Dict[str, Tuple[bool, Optional["Tree"]]])
@@ -383,7 +383,7 @@ Are you asking for the wrong time?"
             log.traceback(exc)
             self.fail(
                 f"""\
-The time {datetime.fromtimestamp(self.timestamp)} is invalid, \
+The time {self.time} is invalid, \
 not enough information could be loaded.\
 """
             )
@@ -458,6 +458,10 @@ not enough information could be loaded.\
 
     def log_api(self, name: str, data: Dict[str, Any]) -> None:
         """Send logs to the spyderbat internal logging API"""
+        if not isinstance(self.config.input, str):
+            url = "https://api.spyderbat.com/"
+        else:
+            url = self.config.input
         new_data = {
             "name": name,
             "application": "spydertop",
@@ -475,7 +479,7 @@ not enough information could be loaded.\
             # send the data to the API
             response = self._http_client.request(
                 "POST",
-                f"{self.config.input}/api/v1/_/log",
+                f"{url}/api/v1/_/log",
                 headers=headers,
                 body=json.dumps(new_data),
             )
@@ -757,7 +761,9 @@ not enough information could be loaded.\
         """The current time, as a datetime object"""
         if self._timestamp is None:
             return None
-        return datetime.fromtimestamp(self._timestamp)
+        return datetime.fromtimestamp(self._timestamp, tz=timezone.utc).astimezone(
+            get_timezone(self)
+        )
 
     @property
     def timestamp(self) -> float:

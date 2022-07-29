@@ -11,7 +11,7 @@ Contains the logic to process cli arguments and start the application
 
 import time
 import gzip
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from os.path import exists
 

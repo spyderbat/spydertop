@@ -12,7 +12,7 @@ Various utilities for spydertop
 import bisect
 import re
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from textwrap import TextWrapper
 from typing import Callable, List, Tuple
 
@@ -121,6 +121,13 @@ def add_palette(text, model, **kwargs) -> Callable[[], str]:
         "meter_label": (palette.get("meter_label", palette["label"]))[0],
     }
     return text.format(**concrete_palette, **kwargs)
+
+
+def get_timezone(model):
+    """Get the timezone based on the config"""
+    return (
+        timezone.utc if model.config["utc_time"] else datetime.now().astimezone().tzinfo
+    )
 
 
 # a palette of colors imitating the default look of htop
@@ -273,15 +280,13 @@ class DelayedLog:
 
     def traceback(self, exception: Exception):
         """Log a traceback to the console."""
-        self._logs.append(
-            (
-                0,
-                "".join(
-                    traceback.format_exception(
-                        type(exception), exception, exception.__traceback__
-                    )
-                ),
-            )
+        self.log(
+            "".join(
+                traceback.format_exception(
+                    type(exception), exception, exception.__traceback__
+                )
+            ),
+            self.DEBUG,
         )
 
     def __del__(self):

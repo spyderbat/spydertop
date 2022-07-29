@@ -96,13 +96,6 @@ class MainFrame(Frame):
             name="MainFrame",
         )
         self._model = model
-        self._state, self._set_state = model.use_state(
-            self._name,
-            {
-                "tab": "processes",
-                "tree_enabled": model.config["tree"],
-            },
-        )
         self._old_settings = model.config.settings
 
         self.set_theme(model.config["theme"])
@@ -232,7 +225,7 @@ class MainFrame(Frame):
 
         self.reset()
         self.fix()
-        self._switch_to_tab(self._state["tab"], force=True)
+        self._switch_to_tab(self._model.config["tab"], force=True)
         self.switch_focus(self._main, 0, 0)
         self._widgets_initialized = True
 
@@ -269,16 +262,19 @@ class MainFrame(Frame):
                     if "tab" in self.palette:
                         button.custom_colour = (
                             "selected_tab"
-                            if self._state["tab"] == button.text.lower()
+                            if self._model.config["tab"] == button.text.lower()
                             else "tab"
                         )
                     else:
                         button.custom_colour = (
                             "selected_focus_field"
-                            if self._state["tab"] == button.text.lower()
+                            if self._model.config["tab"] == button.text.lower()
                             else "focus_field"
                         )
                 self.needs_screen_refresh = True
+
+            if conf["utc_time"] != self._old_settings["utc_time"]:
+                self.needs_recalculate = True
 
             self._footer.change_button_text(
                 "Play" if self._model.config["play"] else "Pause",
@@ -289,7 +285,7 @@ class MainFrame(Frame):
             if (
                 conf["hide_threads"] != self._old_settings["hide_threads"]
                 or conf["hide_kthreads"] != self._old_settings["hide_kthreads"]
-            ) and self._state["tab"] == "processes":
+            ) and self._model.config["tab"] == "processes":
                 self.needs_recalculate = True
             self._old_settings = self._model.config.settings.copy()
 
@@ -386,7 +382,7 @@ class MainFrame(Frame):
             ):
                 current_tab_index = 0
                 for i, tab in enumerate(self._tabs):
-                    if tab.text.lower() == self._state["tab"]:
+                    if tab.text.lower() == self._model.config["tab"]:
                         current_tab_index = i
                         break
                 offset = 1 if event.key_code == Screen.KEY_TAB else -1
@@ -412,31 +408,31 @@ class MainFrame(Frame):
 
     def _build_options(self):
         """Build the options for the records table, depending on the current tab."""
-        if self._state["tab"] == "processes":
+        if self._model.config["tab"] == "processes":
             (
                 self._cached_displayable,
                 self._cached_sortable,
             ) = self._build_process_options()
 
-        if self._state["tab"] == "sessions":
+        if self._model.config["tab"] == "sessions":
             (
                 self._cached_displayable,
                 self._cached_sortable,
             ) = self._build_other_options(self._model.sessions)
 
-        if self._state["tab"] == "flags":
+        if self._model.config["tab"] == "flags":
             (
                 self._cached_displayable,
                 self._cached_sortable,
             ) = self._build_other_options(self._model.flags)
 
-        if self._state["tab"] == "connections":
+        if self._model.config["tab"] == "connections":
             (
                 self._cached_displayable,
                 self._cached_sortable,
             ) = self._build_other_options(self._model.connections)
 
-        if self._state["tab"] == "listening":
+        if self._model.config["tab"] == "listening":
             (
                 self._cached_displayable,
                 self._cached_sortable,
@@ -571,7 +567,7 @@ class MainFrame(Frame):
     def _enable_disable(self):
         """find the currently selected row and enable/disable that
         branch in the model.tree"""
-        if self._state["tab"] != "processes":
+        if self._model.config["tab"] != "processes":
             return
         row = self._columns.get_selected()
 
@@ -658,9 +654,9 @@ class MainFrame(Frame):
         self.needs_screen_refresh = True
 
         # update state
-        if tab_name == self._state["tab"] and not force:
+        if tab_name == self._model.config["tab"] and not force:
             return
-        self._set_state(tab=tab_name)
+        self._model.config["tab"] = tab_name
         self._columns.value = 0
         self.needs_recalculate = True
         self._model.config["sort_column"] = None
@@ -675,7 +671,7 @@ class MainFrame(Frame):
             self._current_columns = PROCESS_COLUMNS
             self._model.config["sort_column"] = "CPU%"
             self._model.config["sort_ascending"] = False
-            self._model.config["tree"] = self._state["tree_enabled"]
+            self._model.config["tree"] = self._model.config["tree_enabled"]
         else:
             self._model.config["tree"] = False
 
@@ -864,9 +860,12 @@ Some information displayed may not be accurate\
     def _config(self, name: str, value=None):
         """Change a config value, and handle any effects"""
         if name == "tree":
-            self._state["tree_enabled"] = value or not self._state["tree_enabled"]
+            self._model.config["tree_enabled"] = (
+                value or not self._model.config["tree_enabled"]
+            )
             self._model.config[name] = (
-                self._state["tree_enabled"] and self._state["tab"] == "processes"
+                self._model.config["tree_enabled"]
+                and self._model.config["tab"] == "processes"
             )
             return
 

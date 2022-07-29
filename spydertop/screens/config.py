@@ -43,6 +43,7 @@ from spydertop.utils import (
     API_LOG_TYPES,
     COLOR_REGEX,
     ExtendedParser,
+    get_timezone,
     pretty_datetime,
     log,
 )
@@ -376,7 +377,7 @@ Once you have a source configured, you can continue.\
 
                 # there is no org selection to go back to if
                 # the user is in only one org
-                if len(self.cache["orgs"]) == 1:
+                if self.cache["orgs"] and len(self.cache["orgs"]) == 1:
                     back = None
 
                 self.build_question(
@@ -400,10 +401,14 @@ Once you have a source configured, you can continue.\
             # just use the currently available time
             if self.cache["looking_for_sources"]:
                 try:
-                    self.config.start_time = datetime.strptime(
-                        self.cache["sources"][0]["last_stored_chunk_end_time"],
-                        "%Y-%m-%dT%H:%M:%SZ",
-                    ).timestamp()
+                    self.config.start_time = (
+                        datetime.strptime(
+                            self.cache["sources"][0]["last_stored_chunk_end_time"],
+                            "%Y-%m-%dT%H:%M:%SZ",
+                        )
+                        .replace(tzinfo=timezone.utc)
+                        .timestamp()
+                    )
                 except ValueError:
                     self.config.start_time = (
                         datetime.now() - timedelta(0, 30)
@@ -567,7 +572,8 @@ see the help page for more information.\
         self.layout.add_widget(Padding(), 1)
         self.layout.add_widget(time, 1)
 
-        default_time = datetime.now() - timedelta(minutes=15)
+        default_time = datetime.now(timezone.utc) - timedelta(minutes=15)
+        time_zone = get_timezone(self.model)
 
         # quick time selector
 
@@ -576,7 +582,7 @@ see the help page for more information.\
         if source_time is not None:
             source_time = datetime.strptime(source_time, "%Y-%m-%dT%H:%M:%SZ")
             source_time = source_time.replace(tzinfo=timezone.utc)
-            source_time_local = source_time.astimezone(tz=default_time.tzinfo)
+            source_time_local = source_time.astimezone(time_zone)
             # offset by a bit to allow for records to come in.
             source_time_local += timedelta(minutes=1)
 
@@ -602,7 +608,7 @@ see the help page for more information.\
             # ignore really old dates
             if last_seen_time.year >= 2020:
                 last_seen_time = last_seen_time.replace(tzinfo=timezone.utc)
-                last_seen_time_local = last_seen_time.astimezone(tz=default_time.tzinfo)
+                last_seen_time_local = last_seen_time.astimezone(time_zone)
                 if last_seen_time_local < default_time.replace(
                     tzinfo=last_seen_time_local.tzinfo
                 ):
@@ -621,8 +627,9 @@ see the help page for more information.\
                 self.layout.add_widget(Padding(), 1)
                 self.layout.add_widget(last_seen_button, 1)
 
-        date.value = default_time
-        time.value = default_time.time()
+        default_time_local = default_time.astimezone(time_zone)
+        date.value = default_time_local
+        time.value = default_time_local.time()
 
         # duration selector
         self.layout.add_widget(Padding(), 1)
@@ -764,26 +771,23 @@ arguments (except for the API Key).\
         self.set_cache(needs_saving=False)
         self.trigger_build()
 
-    @staticmethod
-    def format_source(source: Source) -> str:
+    def format_source(self, source: Source) -> str:
         """Format a source for display"""
+        last_stored_time = (
+            datetime.strptime(
+                source["last_stored_chunk_end_time"],
+                "%Y-%m-%dT%H:%M:%SZ",
+            )
+            .replace(tzinfo=timezone.utc)
+            .astimezone(tz=get_timezone(self.model))
+        )
         return [
             source.get("description", ""),
             " ",
-            pretty_datetime(
-                datetime.strptime(
-                    source["last_stored_chunk_end_time"],
-                    "%Y-%m-%dT%H:%M:%SZ",
-                ).replace(tzinfo=timezone.utc)
-            )
+            pretty_datetime(last_stored_time)
             if "last_stored_chunk_end_time" in source
             else "",
-            str(
-                datetime.strptime(
-                    source["last_stored_chunk_end_time"],
-                    "%Y-%m-%dT%H:%M:%SZ",
-                )
-            ),
+            str(last_stored_time),
             source.get("uid", ""),
         ]
 

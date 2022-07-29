@@ -18,10 +18,16 @@ The format for each of the columns is a tuple of:
     - Whether the column is enabled (by default)
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
-from spydertop.utils import pretty_address, pretty_bytes, pretty_time, PAGE_SIZE
+from spydertop.utils import (
+    get_timezone,
+    pretty_address,
+    pretty_bytes,
+    pretty_time,
+    PAGE_SIZE,
+)
 
 ########################### Processes ###########################
 
@@ -129,7 +135,9 @@ PROCESS_COLUMNS = [
     ),
     (
         "START_TIME",
-        lambda m, pr, r, p: datetime.fromtimestamp(int(p["valid_from"])),
+        lambda m, pr, r, p: datetime.fromtimestamp(
+            int(p["valid_from"]), timezone.utc
+        ).astimezone(get_timezone(m)),
         ">",
         27,
         lambda m, pr, r, p: p["valid_from"],
@@ -294,7 +302,9 @@ SESSION_COLUMNS = [
     ),
     (
         "START_TIME",
-        lambda m, s: datetime.fromtimestamp(int(s["valid_from"])),
+        lambda m, s: datetime.fromtimestamp(
+            int(s["valid_from"]), timezone.utc
+        ).astimezone(get_timezone(m)),
         ">",
         27,
         lambda m, s: s["valid_from"],
@@ -338,7 +348,9 @@ CONNECTION_COLUMNS = [
     ("PTCL", lambda m, c: c["proto"], "<", 4, lambda m, c: c["proto"], True),
     (
         "START_TIME",
-        lambda m, c: datetime.fromtimestamp(c["valid_from"]),
+        lambda m, c: datetime.fromtimestamp(c["valid_from"], timezone.utc).astimezone(
+            get_timezone(m)
+        ),
         "<",
         27,
         lambda m, c: c["valid_from"],
@@ -346,7 +358,11 @@ CONNECTION_COLUMNS = [
     ),
     (
         "END_TIME",
-        lambda m, c: datetime.fromtimestamp(c["valid_to"]) if "valid_to" in c else None,
+        lambda m, c: datetime.fromtimestamp(c["valid_to"], timezone.utc).astimezone(
+            get_timezone(m)
+        )
+        if "valid_to" in c
+        else None,
         "<",
         27,
         lambda m, c: c.get("valid_to", None),
@@ -466,7 +482,9 @@ FLAG_COLUMNS = [
     ("ID", lambda m, f: f["id"], "<", 42, lambda m, f: f["id"], False),
     (
         "TIME",
-        lambda m, f: datetime.fromtimestamp(f["time"]),
+        lambda m, f: datetime.fromtimestamp(f["time"], timezone.utc).astimezone(
+            get_timezone(m)
+        ),
         "<",
         27,
         lambda m, f: f["time"],
@@ -527,7 +545,9 @@ LISTENING_SOCKET_COLUMNS = [
     ("PTCL", lambda m, l: l["proto"], "<", 4, lambda m, l: l["proto"], True),
     (
         "START_TIME",
-        lambda m, l: datetime.fromtimestamp(l["valid_from"]),
+        lambda m, l: datetime.fromtimestamp(l["valid_from"], timezone.utc).astimezone(
+            get_timezone(m)
+        ),
         "<",
         27,
         lambda m, l: l["valid_from"],

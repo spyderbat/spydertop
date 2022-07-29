@@ -188,7 +188,8 @@ def show_ld_avg(model: AppModel):
         )
     if len(ld_avg) == 2:
         return add_palette(
-            "  ${{{meter_label}}}Load average: ${{{background},1}}{ld_avg[0]}, ${{{meter_label},1}}{ld_avg[1]}, ${{1,1}}No Data",
+            "  ${{{meter_label}}}Load average: ${{{background},1}}{ld_avg[0]},"
+            " ${{{meter_label},1}}{ld_avg[1]}, ${{1,1}}No Data",
             model,
         )
     return add_palette(

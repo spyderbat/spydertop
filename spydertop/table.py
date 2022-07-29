@@ -298,7 +298,7 @@ class Table(Widget):
 
         # if we are displaying a tree, we need to use the tree to sort
         # first, and to modify the command
-        if self._config["tree"]:
+        if self._config["tree"] and self._config["tab"] == "processes":
             # we need the columns to have an ID
             assert self._columns[0][0] == "ID"
             # refactor cached sortable data to be indexed by id
@@ -316,7 +316,11 @@ class Table(Widget):
         Filter the rows by the configured value.
         """
         value = self._config["filter"]
-        rows = self._tree_rows if self._config["tree"] else self._rows
+        rows = (
+            self._tree_rows
+            if self._config["tree"] and self._config["tab"] == "processes"
+            else self._rows
+        )
         if value is None:
             self._filtered_rows = rows
             return

@@ -66,6 +66,8 @@ class Config:
         "tree": False,
         "collapse_tree": False,
         "follow_record": False,
+        "utc_time": False,
+        "tab": "processes",
         "theme": "htop",
         "has_submitted_feedback": False,
     }
