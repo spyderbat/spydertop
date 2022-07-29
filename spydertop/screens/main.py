@@ -897,6 +897,17 @@ Some information displayed may not be accurate\
     # -- moving to other frames -- #
     def _back(self):
         """Move back to configuring sources"""
+        # don't go back if the input is from a file
+        if not isinstance(self._model.config.input, str):
+            self.scene.add_effect(
+                NotificationModal(
+                    self.screen,
+                    "There's no going back! Input is from a file.",
+                    self,
+                    frames=40,
+                )
+            )
+            return
         self._model.log_api(API_LOG_TYPES["navigation"], {"button": "back"})
         self._model.config.source_confirmed = False
         self._model.config.start_time = None

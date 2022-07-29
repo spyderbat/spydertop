@@ -115,7 +115,7 @@ class Table(Widget):
 
         # then, print the rows
         y_offset = 1
-        for i in range(self._vertical_offset, self._vertical_offset + self._h):
+        for i in range(self._vertical_offset, self._vertical_offset + self._h - 1):
             if i >= len(self._filtered_rows) or i < 0:
                 break
             displayable_row, _ = self._filtered_rows[i]

@@ -162,7 +162,7 @@ class NotificationModal(Frame):
             ):
                 self._scene.remove_effect(self)
                 return
-        if isinstance(event, MouseEvent):
+        if isinstance(event, MouseEvent) and event.buttons != 0:
             self._scene.remove_effect(self)
         return self._parent.process_event(event)
 
