@@ -100,7 +100,9 @@ class AppModel:
     def init(self) -> None:
         """Initialize the model, loading data from the source. Requires config to be complete"""
         self._timestamp = (
-            self.config.start_time.timestamp() if self.config.start_time else None
+            self.config.start_time.astimezone(timezone.utc).timestamp()
+            if self.config.start_time
+            else None
         )
 
         if self.api_client is None:
@@ -118,8 +120,9 @@ class AppModel:
                 self.fail("An exception occurred while loading data")
                 log.traceback(exc)
 
-        self.thread = threading.Thread(target=guard)
-        self.thread.start()
+        thread = threading.Thread(target=guard)
+        thread.start()
+        self.thread = thread
 
         # if the output file is gzipped, open it with gzip
         if self.config.output and self.config.output.name.endswith(".gz"):
@@ -157,16 +160,23 @@ class AppModel:
             api_instance = source_data_api.SourceDataApi(self.api_client)
             input_data = {
                 # request data from a bit earlier, so that the information is properly filled out
-                "st": timestamp - before.total_seconds(),
+                "st": timestamp - before.total_seconds() + 30,
                 "et": timestamp + duration.total_seconds(),
                 "src": self.config.machine,
             }
 
-            self._time_span_tracker.add_time_span(input_data["st"], input_data["et"])
+            # we need more than one event_top record, so a buffer of 30 seconds is used
+            # to make sure the data is available
+            self._time_span_tracker.add_time_span(
+                input_data["st"] + 30, input_data["et"]
+            )
 
             try:
                 log.info("Querying api for spydergraph records")
                 self.progress = 0.1
+                log.debug(
+                    {"org_uid": self.config.org, "dt": "spydergraph", **input_data}
+                )
                 api_response = api_instance.src_data_query_v2(
                     org_uid=self.config.org, dt="spydergraph", **input_data
                 )
@@ -175,6 +185,7 @@ class AppModel:
                 self.progress = 0.5
 
                 log.info("Querying api for resource usage records")
+                log.debug({"org_uid": self.config.org, "dt": "htop", **input_data})
                 api_response = api_instance.src_data_query_v2(
                     org_uid=self.config.org, dt="htop", **input_data
                 )
@@ -330,31 +341,36 @@ Are you asking for the wrong time?"
             if not self._time_span_tracker.is_loaded(self._timestamp) and isinstance(
                 self.config.input, str
             ):
-                # load data for a time farther away from the loaded
-                # time if self._timestamp is close
-                # this is to avoid loading data that is not needed
-                if len(self._tops.data) == 0:
-                    closest_time = self._timestamp
-                    offset = 0
-                elif not self._tops.is_valid(0):
-                    closest_time = self._tops.data[0]["time"]
-                    offset = -298
-                else:
-                    closest_time = self._tops[0]["time"]
-                    offset = +298
+                # this is currently disabled due to errors
+                #
+                # # load data for a time farther away from the loaded
+                # # time if self._timestamp is close
+                # # this is to avoid loading data that is not needed
+                # if len(self._tops.data) == 0:
+                #     closest_time = self._timestamp
+                #     offset = 0
+                # # make sure to leave a buffer of 2 event_tops
+                # elif not self._tops.is_valid(-2):
+                #     closest_time = self._tops.data[2]["time"]
+                #     offset = -298
+                # else:
+                #     closest_time = self._tops[0]["time"]
+                #     offset = +298
 
-                time_to_load = (
-                    self._timestamp
-                    if abs(self._timestamp - closest_time) > 300
-                    else closest_time + offset
-                )
+                # time_to_load = (
+                #     self._timestamp
+                #     if abs(self._timestamp - closest_time) > 300
+                #     else closest_time + offset
+                # )
+                time_to_load = self._timestamp
 
-                self.thread = threading.Thread(
+                thread = threading.Thread(
                     target=lambda: self.load_data(
                         time_to_load, timedelta(seconds=300), timedelta(seconds=300)
                     )
                 )
-                self.thread.start()
+                thread.start()
+                self.thread = thread
                 return
 
             # correct the memory information

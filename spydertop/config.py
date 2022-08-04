@@ -153,12 +153,19 @@ class Config:
             self.input = (
                 f_input
                 or (
-                    "https://" + config_default["api_url"]
+                    (
+                        "https://" + config_default["api_url"]
+                        if "http" not in config_default["api_url"]
+                        else config_default["api_url"]
+                    )
                     if "api_url" in config_default
                     else None
                 )
                 or "https://api.spyderbat.com"
             )
+            # remove the trailing slash if it exists
+            if isinstance(self.input, str) and self.input[-1] == "/":
+                self.input = self.input[:-1]
             self.output = output
             self.start_time = datetime.fromtimestamp(start_time) if start_time else None
             self.start_duration = timedelta(0, duration, 0)

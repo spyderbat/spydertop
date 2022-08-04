@@ -15,8 +15,8 @@ import fnmatch
 import re
 from time import sleep
 from threading import Thread
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, List, Optional, Tuple
+from datetime import datetime, timedelta, timezone, tzinfo
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import yaml
 from spyderbat_api.models import Org, Source
@@ -471,7 +471,9 @@ Once you have a source configured, you can continue.\
             text_input.value = search_string
 
         self.layout.add_widget(Label(question, align="^"), 1)
+        self.layout.add_widget(Label("Search:", align="<"), 1)
         self.layout.add_widget(text_input, 1)
+        self.layout.add_widget(Padding(), 1)
         self.layout.add_widget(list_box, 1)
         self.footer.add_widget(
             Button(
@@ -554,8 +556,12 @@ see the help page for more information.\
         time_label = Label("Start Time: 15 minutes ago")
         self.layout.add_widget(time_label, 1)
 
+        time_zone = get_timezone(self.model)
+
         def on_change():
-            selected_time = datetime.combine(date.value, time.value)
+            selected_time = datetime.combine(date.value, time.value).replace(
+                tzinfo=time_zone
+            )
             # remove the color from the time label
             time_label.text = f"Start Time: {pretty_datetime(selected_time)[4:]}"
 
@@ -573,7 +579,6 @@ see the help page for more information.\
         self.layout.add_widget(time, 1)
 
         default_time = datetime.now(timezone.utc) - timedelta(minutes=15)
-        time_zone = get_timezone(self.model)
 
         # quick time selector
 
@@ -609,9 +614,7 @@ see the help page for more information.\
             if last_seen_time.year >= 2020:
                 last_seen_time = last_seen_time.replace(tzinfo=timezone.utc)
                 last_seen_time_local = last_seen_time.astimezone(time_zone)
-                if last_seen_time_local < default_time.replace(
-                    tzinfo=last_seen_time_local.tzinfo
-                ):
+                if last_seen_time_local < default_time:
                     default_time = last_seen_time_local
 
                 def last_seen_button_callback():
@@ -636,35 +639,37 @@ see the help page for more information.\
         duration_label = Label("Duration to pre-load: +/-5 minutes")
         self.layout.add_widget(duration_label, 1)
 
-        def int_validator(value: str) -> bool:
+        def num_validator(value: str) -> bool:
             try:
-                int(value)
+                float(value)
                 return True
             except ValueError:
                 return False
 
         def on_change2():
             nonlocal selected_duration
-            if int_validator(duration.value):
-                selected_duration = timedelta(minutes=int(duration.value))
+            if num_validator(duration.value):
+                selected_duration = timedelta(minutes=float(duration.value))
                 duration_label.text = (
                     f"Duration to pre-load: +{duration.value} minutes, -5 minutes"
                 )
 
         self.layout.add_widget(Padding(), 1)
         duration = Text(
-            label="Duration:", validator=int_validator, on_change=on_change2
+            label="Duration:", validator=num_validator, on_change=on_change2
         )
-        duration.value = "5"
+        duration.value = str(float(self.config.start_duration.total_seconds() // 60))
 
-        selected_duration = timedelta(minutes=int(duration.value))
+        selected_duration = timedelta(minutes=float(duration.value))
 
         self.layout.add_widget(duration, 1)
 
         self.footer.add_widget(
             Button(
                 "Continue",
-                lambda: self.set_start_time(date.value, time.value, selected_duration),
+                lambda: self.set_start_time(
+                    date.value, time.value, selected_duration, time_zone
+                ),
             ),
             1,
         )
@@ -812,10 +817,14 @@ arguments (except for the API Key).\
         self.trigger_build()
 
     def set_start_time(
-        self, date: datetime, time: datetime, duration: timedelta
+        self,
+        date: datetime,
+        time: datetime,
+        duration: timedelta,
+        time_zone: Union[timezone, tzinfo, None],
     ) -> None:
         """Set the start time"""
-        self.config.start_time = datetime.combine(date, time)
+        self.config.start_time = datetime.combine(date, time).replace(tzinfo=time_zone)
         self.config.start_duration = duration
         self.trigger_build()
 

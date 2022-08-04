@@ -148,10 +148,10 @@ Defaults to the values set in your spyderbat_api config",
 @click.option(
     "--duration",
     "-d",
-    default=300,
+    default=900,
     type=Duration(),
     help="What period of time records should be pre-fetched for playback in seconds. \
-Defaults to 5 minutes",
+Defaults to 15 minutes",
 )
 @click.option(
     "--input",
