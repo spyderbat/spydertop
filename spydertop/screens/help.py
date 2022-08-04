@@ -46,7 +46,7 @@ class HelpFrame(Frame):
             FuncLabel(
                 lambda: add_palette(
                     """\
-${{{label},1}}spydertop 0.4.0 - (C) 2022 Spyderbat
+${{{label},1}}spydertop 0.4.1 - (C) 2022 Spyderbat
 ${{{label},1}}Styled after htop.\
 """,
                     model,
