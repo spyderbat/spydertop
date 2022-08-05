@@ -102,6 +102,14 @@ def color_cmd(_m, _pr, _r, p):
 PROCESS_COLUMNS = [
     ("ID", lambda m, pr, r, p: p["id"], "<", 30, lambda m, pr, r, p: p["id"], False),
     (
+        "NAME",
+        lambda m, pr, r, p: p["name"],
+        "<",
+        15,
+        lambda m, pr, r, p: p["name"],
+        False,
+    ),
+    (
         "PPID",
         lambda m, pr, r, p: int(p["ppid"]),
         ">",

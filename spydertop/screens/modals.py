@@ -94,11 +94,13 @@ class InputModal(Frame):
                     self._on_submit(self._text_input.value)
                 self._scene.remove_effect(self)
                 self._on_death()
+                return
             if event.key_code == Screen.KEY_ESCAPE:
                 # on escape, clear the input
                 self._on_change(None)
                 self._scene.remove_effect(self)
                 self._on_death()
+                return
         elif isinstance(event, MouseEvent):
             if (
                 self.rebase_event(event).x < 0
@@ -110,6 +112,7 @@ class InputModal(Frame):
                 self._on_change(None)
                 self._scene.remove_effect(self)
                 self._on_death()
+                return
 
         return super().process_event(event)
 

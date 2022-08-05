@@ -329,7 +329,10 @@ class Table(Widget):
         if self._state["selected_row"] >= len(self._filtered_rows):
             self.value = 0
 
-    def _filter_predicate(self, row, column_matches, rest) -> bool:
+    def _filter_predicate(
+        self, row: InternalRow, column_matches: List[str], rest: str
+    ) -> bool:
+        # filter by specific columns
         for column_match in column_matches:
             try:
                 index = [_[0].lower() for _ in self._columns].index(
@@ -337,6 +340,7 @@ class Table(Widget):
                 )
                 if index >= len(row[0]):
                     return False
+                # handle numerical comparisons
                 if column_match[1][0] in {"<", ">"}:
                     if row[1][index] is None:
                         return False
@@ -345,20 +349,28 @@ class Table(Widget):
                             return False
                     elif row[1][index] <= float(column_match[1][1:]):
                         return False
+                # handle nots
                 elif column_match[1][0] == "!" and column_match[1][1:] in row[0][index]:
                     return False
+                # handle case with no operator
                 elif (column_match[1][0] != "!") and not column_match[1] in row[0][
                     index
                 ]:
                     return False
             except ValueError:
                 pass
-        combined = " ".join([str(_) for _ in row[0]])
+
+        # match the rest against the entire visible row
+        combined = " ".join(
+            [str(v) for i, v in enumerate(row[0]) if self._columns[i][1]]
+        )
+
         if len(rest) > 0 and rest[0] == "!":
             return rest[1:] not in combined
+
         return rest in combined
 
-    def _parse_filter(self, value: str) -> List[Tuple[str, str]]:
+    def _parse_filter(self, value: str) -> Tuple[List[str], str]:
         """
         Parse a filter string into a list of tuples of the form (column, value).
         """
@@ -383,13 +395,14 @@ class Table(Widget):
         if self._state["selected_row"] >= self._vertical_offset + self._h - 1:
             self._vertical_offset = self._state["selected_row"] - self._h + 2
 
-    def find(self, search: str):
+    def find(self, search: str) -> bool:
         """Finds the first row that contains the given search string."""
         column_matches, rest = self._parse_filter(search)
         for i, row in enumerate(self._filtered_rows):
             if self._filter_predicate(row, column_matches, rest):
                 self.value = i
-                return
+                return True
+        return False
 
     def get_selected(self) -> InternalRow:
         """Returns the selected row"""

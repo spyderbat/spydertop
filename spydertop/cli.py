@@ -11,7 +11,7 @@ Contains the logic to process cli arguments and start the application
 
 import time
 import gzip
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 from os.path import exists
 
@@ -136,7 +136,8 @@ class FileOrUrl(click.ParamType):
     "--organization",
     "-g",
     type=str,
-    help="The organization ID to pull data from. Defaults to the values set in your spyderbat_api config",
+    help="The organization ID to pull data from. \
+Defaults to the values set in your spyderbat_api config",
 )
 @click.option(
     "--machine",

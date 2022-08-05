@@ -171,25 +171,33 @@ class AppModel:
                 input_data["st"] + 30, input_data["et"]
             )
 
+            log.log(self._time_span_tracker.times)
+
             try:
                 log.info("Querying api for spydergraph records")
                 self.progress = 0.1
                 log.debug(
                     {"org_uid": self.config.org, "dt": "spydergraph", **input_data}
                 )
-                api_response = api_instance.src_data_query_v2(
-                    org_uid=self.config.org, dt="spydergraph", **input_data
+                api_response: urllib3.HTTPResponse = api_instance.src_data_query_v2(
+                    org_uid=self.config.org,
+                    dt="spydergraph",
+                    **input_data,
+                    _preload_content=False,
                 )
-                lines += api_response.split("\n")
+                lines += api_response.data.split(b"\n")
 
                 self.progress = 0.5
 
                 log.info("Querying api for resource usage records")
                 log.debug({"org_uid": self.config.org, "dt": "htop", **input_data})
                 api_response = api_instance.src_data_query_v2(
-                    org_uid=self.config.org, dt="htop", **input_data
+                    org_uid=self.config.org,
+                    dt="htop",
+                    **input_data,
+                    _preload_content=False,
                 )
-                lines += api_response.split("\n")
+                lines += api_response.data.split(b"\n")
                 self.log_api(
                     API_LOG_TYPES["loaded_data"],
                     {
@@ -250,6 +258,9 @@ No more records can be loaded."
             )
 
         if self.config.output:
+            # if lines is still binary, convert to text
+            if len(lines) > 0 and isinstance(lines[0], bytes):
+                lines = [line.decode("utf-8") for line in lines]
             self.config.output.write("\n".join([l.rstrip() for l in lines]))
 
         self._process_records(lines)
@@ -259,7 +270,7 @@ No more records can be loaded."
         log.info("Parsing records")
         self.progress = 0.0
 
-        if not lines or len(lines) == 0 or lines[0] == "":
+        if not lines or len(lines) == 0 or lines[0] == "" or lines[0] == b"":
             self.fail(
                 "Loading was successful, but no records were found. \
 Are you asking for the wrong time?"
@@ -475,7 +486,7 @@ not enough information could be loaded.\
     def log_api(self, name: str, data: Dict[str, Any]) -> None:
         """Send logs to the spyderbat internal logging API"""
         if not isinstance(self.config.input, str):
-            url = "https://api.spyderbat.com/"
+            url = "https://api.spyderbat.com"
         else:
             url = self.config.input
         new_data = {
@@ -701,6 +712,12 @@ not enough information could be loaded.\
         self.failure_reason = ""
         self.progress = 0
         self.columns_changed = False
+
+    def is_loaded(self, timestamp: float) -> bool:
+        """Return whether the model has loaded data for the given time"""
+        return self._time_span_tracker.is_loaded(timestamp) or not isinstance(
+            self.config.input, str
+        )
 
     @property
     def state(self) -> str:

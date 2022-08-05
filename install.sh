@@ -14,10 +14,10 @@ fi
 
 git clone https://github.com/spyderbat/api_examples.git
 cd api_examples/python
-pip install .
+$PIP install .
 
 cd ../../
 
-pip install .
+$PIP install .
 
 set +ex

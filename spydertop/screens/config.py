@@ -83,6 +83,7 @@ class ConfigurationFrame(Frame):
                 "looking_for_sources": False,  # bool
                 "needs_saving": False,  # bool
                 "created_account": False,  # bool
+                "notification": None,  # Optional[str]
             },
         )
 
@@ -157,6 +158,13 @@ Please make sure you entered it correctly.",
                 )
                 return
             self.build_error(self.model.failure_reason)
+            return
+
+        # if there is a notification, display it
+        if self.cache["notification"] is not None:
+            self.build_instructions(
+                self.cache["notification"], lambda: self.set_cache(notification=None)
+            )
             return
 
         # if the config is complete, display the main screen
@@ -253,19 +261,28 @@ logging into your account on the website.\
                         except ValueError:
                             index = 0
 
+                    orgs = sorted(
+                        self.cache["orgs"],
+                        key=lambda o: o.get("total_sources", 0),
+                        reverse=True,
+                    )
+
                     self.build_question(
                         "Please select an organization",
                         [
                             (
                                 [
                                     org["name"],
+                                    f"Sources: {org['total_sources']}"
+                                    if "total_sources" in org
+                                    else "",
                                     str(org.get("owner_email", "")),
-                                    # " ".join(org["tags"]) if "tags" in org else "",
+                                    ", ".join(org["tags"]) if "tags" in org else "",
                                     org["uid"],
                                 ],
                                 lambda o=org: self.set_org(o),
                             )
-                            for org in self.cache["orgs"]
+                            for org in orgs
                         ],
                         index,
                     )
@@ -297,7 +314,14 @@ logging into your account on the website.\
                             sleep(1)
                             load_sources()
                             return
-                    self.set_cache(sources=sources)
+                    self.set_cache(
+                        sources=[
+                            source
+                            for source in sources
+                            # the global source is not useful in this context
+                            if not source["uid"].startswith("global:")
+                        ]
+                    )
                     self.trigger_build()
                     self._screen.force_update()
 
@@ -470,6 +494,17 @@ Once you have a source configured, you can continue.\
         if search_string is not None:
             text_input.value = search_string
 
+        self._on_submit = (
+            lambda: answers[list_box.value][1]()
+            if list_box.value is not None
+            else (
+                self.set_cache(
+                    notification="No option was selected, please select one"
+                ),
+                self.trigger_build(),
+            )
+        )
+
         self.layout.add_widget(Label(question, align="^"), 1)
         self.layout.add_widget(Label("Search:", align="<"), 1)
         self.layout.add_widget(text_input, 1)
@@ -478,8 +513,7 @@ Once you have a source configured, you can continue.\
         self.footer.add_widget(
             Button(
                 "Continue",
-                # pylint: disable=unnecessary-lambda
-                lambda: answers[list_box.value][1](),
+                self._on_submit,
             ),
             1,
         )
@@ -487,8 +521,6 @@ Once you have a source configured, you can continue.\
             self.footer.add_widget(Button("Quit", self.quit), 2)
         else:
             self.footer.add_widget(Button("Back", back_button), 2)
-        # pylint: disable=unnecessary-lambda
-        self._on_submit = lambda: answers[list_box.value][1]()
 
     def build_instructions(self, instructions: str, callback: Callable) -> None:
         """Construct a layout that displays instructions and waits for user to continue"""
@@ -778,14 +810,17 @@ arguments (except for the API Key).\
 
     def format_source(self, source: Source) -> str:
         """Format a source for display"""
-        last_stored_time = (
-            datetime.strptime(
-                source["last_stored_chunk_end_time"],
-                "%Y-%m-%dT%H:%M:%SZ",
+        try:
+            last_stored_time = (
+                datetime.strptime(
+                    source["last_stored_chunk_end_time"],
+                    "%Y-%m-%dT%H:%M:%SZ",
+                )
+                .replace(tzinfo=timezone.utc)
+                .astimezone(tz=get_timezone(self.model))
             )
-            .replace(tzinfo=timezone.utc)
-            .astimezone(tz=get_timezone(self.model))
-        )
+        except OverflowError:
+            last_stored_time = datetime.fromtimestamp(0).replace(tzinfo=timezone.utc)
         return [
             source.get("description", ""),
             " ",

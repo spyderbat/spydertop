@@ -15,6 +15,9 @@ docker run -it spyderbat/spydertop -i examples/minikube-sock-shop.json.gz
 
 # to persist settings, or to use a pre-configured Spyderbat API
 docker run -it -v $HOME/.spyderbat-api:/root/.spyderbat-api spyderbat/spydertop [ARGS]
+
+# to run docker with the host's timezone settings
+docker run -it -v /etc/localtime:/etc/localtime spyderbat/spydertop [ARGS]
 ```
 
 ## Installation

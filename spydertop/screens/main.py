@@ -247,8 +247,22 @@ class MainFrame(Frame):
             if self._last_frame != 0:
                 frames_delta = frame_no - self._last_frame
                 time_delta = frames_delta / 20
-                self._model.timestamp += time_delta * conf["play_speed"]
-                self.needs_recalculate = True
+                new_time = self._model.timestamp + time_delta * conf["play_speed"]
+                if not self._model.is_loaded(new_time):
+                    # stop playing and notify user
+                    conf["play"] = False
+                    self.scene.add_effect(
+                        NotificationModal(
+                            self.screen,
+                            "The end of loaded data has been reached. "
+                            "Continue forward to load more data.",
+                            self,
+                            frames=40,
+                        )
+                    )
+                else:
+                    self._model.timestamp = new_time
+                    self.needs_recalculate = True
             self._last_frame = frame_no
 
         # detect changes in settings
@@ -735,6 +749,7 @@ class MainFrame(Frame):
                 theme=self._model.config["theme"],
                 on_change=run_search,
                 on_death=lambda: self._switch_buttons("main"),
+                validator=self._columns.find,
             )
         )
 
