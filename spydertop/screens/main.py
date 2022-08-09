@@ -13,6 +13,8 @@ as well as showing all the menu buttons.
 from math import nan
 import re
 from typing import Any, Dict, List, Optional, Tuple
+import urllib
+import pyperclip
 
 from asciimatics.screen import Screen
 from asciimatics.widgets import (
@@ -373,6 +375,7 @@ class MainFrame(Frame):
             " ": self._play,
             "C": self._show_setup,
             "S": self._show_setup,
+            "u": self._show_url,
             "H": lambda: self._config("hide_threads"),
             "K": lambda: self._config("hide_kthreads"),
             "I": lambda: self._config("sort_ascending"),
@@ -794,6 +797,48 @@ class MainFrame(Frame):
                 theme=self._model.config["theme"],
                 on_change=set_filter,
                 on_death=lambda: self._switch_buttons("main"),
+            )
+        )
+
+    def _show_url(self):
+        """Show a url menu with full width"""
+        self._model.log_api(API_LOG_TYPES["navigation"], {"menu": "url"})
+
+        row = self._columns.get_selected()
+        if (
+            not row
+            or not self._model.config.org
+            or not self._model.config.machine
+            or not isinstance(self._model.config.input, str)
+        ):
+            log.info("No row selected or no org/machine/input. Skipping URL")
+            self._scene.add_effect(
+                NotificationModal(
+                    self.screen,
+                    text="${1,1}Error:${-1,2} Cannot create URL. "
+                    "This is likely because you are loading from a file.",
+                    parent=self,
+                    frames=30,
+                )
+            )
+            return
+
+        url = f"https://app.spyderbat.com/app/org/{self._model.config.org}\
+/source/{self._model.config.machine}/spyder-console?ids={urllib.parse.quote(row[0][0])}"
+
+        try:
+            pyperclip.copy(url)
+            label = "URL copied to the clipboard."
+        except Exception:  # pylint: disable=broad-except
+            label = "Could not copy URL to the clipboard."
+
+        self._scene.add_effect(
+            NotificationModal(
+                self.screen,
+                text=f" {label} \n {url} ",
+                parent=self,
+                frames=None,
+                max_width=self.screen.width - 2,
             )
         )
 

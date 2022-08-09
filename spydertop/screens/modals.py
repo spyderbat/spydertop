@@ -121,7 +121,13 @@ class NotificationModal(Frame):
     """A modal frame for displaying a notification"""
 
     def __init__(
-        self, screen: Screen, text: str, parent: Frame, frames=20, **kwargs
+        self,
+        screen: Screen,
+        text: str,
+        parent: Frame,
+        frames=20,
+        max_width: Optional[int] = None,
+        **kwargs,
     ) -> None:
         """
         :param screen: The screen to draw on
@@ -129,10 +135,12 @@ class NotificationModal(Frame):
         :param parent: The parent frame, used for passing events and the theme
         :param frames: The number of frames to display the notification (None for until closed)
         """
+        if max_width is None:
+            max_width = screen.width // 2
         self._label = FuncLabel(lambda: text, parser=ExtendedParser(), indent="    ")
         max_len = min(
             max(len(re.sub(COLOR_REGEX, "", line)) for line in text.split("\n")),
-            screen.width // 2,
+            max_width,
         )
         height = self._label.required_height(0, max_len)
         super().__init__(

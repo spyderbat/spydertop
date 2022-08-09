@@ -46,7 +46,7 @@ class HelpFrame(Frame):
             FuncLabel(
                 lambda: add_palette(
                     """\
-${{{label},1}}spydertop 0.4.2 - (C) 2022 Spyderbat
+${{{label},1}}spydertop 0.4.3 - (C) 2022 Spyderbat
 ${{{label},1}}Styled after htop.\
 """,
                     model,
@@ -88,6 +88,7 @@ ${{{label},1}} Home/End:${{{background}}} jump to list top/bottom
 ${{{label},1}}  PgUp/Dn:${{{background}}} jump one page up/down
 ${{{label},1}}    Enter:${{{background}}} chow full record details
 ${{{label},1}}Tab/S-Tab:${{{background}}} move to the next/previous tab
+${{{label},1}}        u:${{{background}}} copy a link to the console for the record
 ${{{label},1}}        H:${{{background}}} show/hide threads
 ${{{label},1}}        K:${{{background}}} show/hide kernel threads
 ${{{label},1}}        I:${{{background}}} toggle sorting direction
