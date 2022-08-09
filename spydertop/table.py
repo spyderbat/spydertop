@@ -404,8 +404,13 @@ class Table(Widget):
                 return True
         return False
 
-    def get_selected(self) -> InternalRow:
+    def get_selected(self) -> Optional[InternalRow]:
         """Returns the selected row"""
+        if (
+            self._state["selected_row"] >= len(self._filtered_rows)
+            or self._state["selected_row"] < 0
+        ):
+            return None
         return self._filtered_rows[self._state["selected_row"]]
 
     def _sort_level(

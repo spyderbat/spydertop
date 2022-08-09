@@ -584,6 +584,8 @@ class MainFrame(Frame):
         if self._model.config["tab"] != "processes":
             return
         row = self._columns.get_selected()
+        if row is None:
+            return
 
         def recursive_enable_disable(tree, id_to_ed):
             for rec_id, branch in tree.items():
@@ -798,6 +800,8 @@ class MainFrame(Frame):
     def _show_details(self):
         """Show a modal with details about the selected record"""
         row = self._columns.get_selected()
+        if not row:
+            return
 
         label_fg = self.palette["label"][0]
         field_fg = self.palette["field"][0]

@@ -86,16 +86,16 @@ ${{{label},1}}   Arrows:${{{background}}} scroll record list
 ${{{label},1}} S-Arrows:${{{background}}} scroll faster
 ${{{label},1}} Home/End:${{{background}}} jump to list top/bottom
 ${{{label},1}}  PgUp/Dn:${{{background}}} jump one page up/down
-${{{label},1}}    Enter:${{{background}}} Show full record details
-${{{label},1}}Tab/S-Tab:${{{background}}} Move to the next/previous tab
+${{{label},1}}    Enter:${{{background}}} chow full record details
+${{{label},1}}Tab/S-Tab:${{{background}}} move to the next/previous tab
 ${{{label},1}}        H:${{{background}}} show/hide threads
 ${{{label},1}}        K:${{{background}}} show/hide kernel threads
 ${{{label},1}}        I:${{{background}}} toggle sorting direction
-${{{label},1}}        p:${{{background}}} Switch to processes tab
-${{{label},1}}        f:${{{background}}} Switch to flags tab
-${{{label},1}}        s:${{{background}}} Switch to sessions tab
-${{{label},1}}        c:${{{background}}} Switch to connections tab
-${{{label},1}}        l:${{{background}}} Switch to listening tab\
+${{{label},1}}        p:${{{background}}} switch to processes tab
+${{{label},1}}        f:${{{background}}} switch to flags tab
+${{{label},1}}        s:${{{background}}} switch to sessions tab
+${{{label},1}}        c:${{{background}}} switch to connections tab
+${{{label},1}}        l:${{{background}}} switch to listening tab\
 """,
                     model,
                 ),

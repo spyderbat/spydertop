@@ -99,6 +99,16 @@ def color_cmd(_m, _pr, _r, p):
     return color + base
 
 
+def format_environ(_m, _pr, _r, p):
+    """Format the environment of a process"""
+    environ_lines = json.dumps(
+        p.get("environ", None) or {}, indent=4, sort_keys=True
+    ).split("\n")
+    if len(environ_lines) > 10:
+        environ_lines = environ_lines[:9] + ["    ... <remaining values hidden>"]
+    return "\n".join(environ_lines)
+
+
 PROCESS_COLUMNS = [
     ("ID", lambda m, pr, r, p: p["id"], "<", 30, lambda m, pr, r, p: p["id"], False),
     (
@@ -260,9 +270,7 @@ PROCESS_COLUMNS = [
     ),
     (
         "ENVIRONMENT",
-        lambda m, pr, r, p: json.dumps(
-            p.get("environ", None) or {}, indent=4, sort_keys=True
-        ),
+        format_environ,
         "<",
         11,
         lambda m, pr, r, p: json.dumps(p.get("environ", None) or {}),
