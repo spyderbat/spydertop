@@ -15,6 +15,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 import urllib
 import pyperclip
+import webbrowser
 
 from asciimatics.screen import Screen
 from asciimatics.widgets import (
@@ -375,7 +376,8 @@ class MainFrame(Frame):
             " ": self._play,
             "C": self._show_setup,
             "S": self._show_setup,
-            "u": self._show_url,
+            "u": lambda: self._show_url(True),
+            "U": lambda: self._show_url(False),
             "H": lambda: self._config("hide_threads"),
             "K": lambda: self._config("hide_kthreads"),
             "I": lambda: self._config("sort_ascending"),
@@ -800,7 +802,7 @@ class MainFrame(Frame):
             )
         )
 
-    def _show_url(self):
+    def _show_url(self, open_in_browser: bool = False):
         """Show a url menu with full width"""
         self._model.log_api(API_LOG_TYPES["navigation"], {"menu": "url"})
 
@@ -826,16 +828,24 @@ class MainFrame(Frame):
         url = f"https://app.spyderbat.com/app/org/{self._model.config.org}\
 /source/{self._model.config.machine}/spyder-console?ids={urllib.parse.quote(row[0][0])}"
 
+        # try to open the url in the browser and copy it to the clipboard
+        browser_label = "URL not opened in browser"
+        if open_in_browser:
+            try:
+                webbrowser.open(url)
+                browser_label = "URL Opened in browser"
+            except Exception:  # pylint: disable=broad-except
+                browser_label = "Failed to open URL in browser"
         try:
             pyperclip.copy(url)
-            label = "URL copied to the clipboard."
+            label = "URL copied to the clipboard"
         except Exception:  # pylint: disable=broad-except
-            label = "Could not copy URL to the clipboard."
+            label = "Could not copy URL to the clipboard"
 
         self._scene.add_effect(
             NotificationModal(
                 self.screen,
-                text=f" {label} \n {url} ",
+                text=f" {browser_label} \n {label} \n {url} ",
                 parent=self,
                 frames=None,
                 max_width=self.screen.width - 2,

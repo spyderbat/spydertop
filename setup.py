@@ -16,7 +16,7 @@
 from setuptools import setup
 
 NAME = "spydertop"
-VERSION = "0.4.3"
+VERSION = "0.4.4"
 
 REQUIRES = ["asciimatics", "click", "spyderbat-api", "pyyaml", "pyperclip"]
 

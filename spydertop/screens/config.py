@@ -626,6 +626,9 @@ see the help page for more information.\
             def button_callback():
                 date.value = source_time_local
                 time.value = source_time_local.time()
+                warning_label.text = (
+                    "Warning: the create time may not have complete data"
+                )
                 on_change()
 
             create_time_button = Button(
@@ -633,8 +636,10 @@ see the help page for more information.\
                 + re.sub(COLOR_REGEX, "", pretty_datetime(source_time_local)),
                 button_callback,
             )
+            warning_label = Label("")
             self.layout.add_widget(Padding(), 1)
             self.layout.add_widget(create_time_button, 1)
+            self.layout.add_widget(warning_label, 1)
 
         last_seen_time = self.cache.get("source", {}).get(
             "last_stored_chunk_end_time", None
