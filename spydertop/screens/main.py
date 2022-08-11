@@ -62,7 +62,8 @@ from spydertop.screens.footer import Footer
 
 
 class MainFrame(Frame):
-    """The main frame for the application"""
+    """The main frame for the application. This frame is responsible
+    for taking user input and determining how much to update the screen."""
 
     # update and caching management
     _model: AppModel
@@ -104,6 +105,8 @@ class MainFrame(Frame):
         self.set_theme(model.config["theme"])
 
     def _init_widgets(self):
+        """Initialize the widgets for the main frame. This is separate from the
+        __init__ function because the widgets require the model to be initialized."""
         ############## Header #################
         header = Layout([1, 1], fill_frame=False)
         self.add_layout(header)

@@ -12,4 +12,5 @@
     in the past, utilizing the spyderbat apis.
 """
 
+# see the cli function in cli.py for the entry point
 from spydertop.cli import cli

@@ -51,7 +51,8 @@ from spydertop.utils import (
 
 class ConfigurationFrame(Frame):
     """Frame for initial configuration of the application
-    to prepare for API access."""
+    to prepare for API access. This frame has several views,
+    and switches between them by clearing the layout and rebuilding it."""
 
     config: Config
     model: AppModel

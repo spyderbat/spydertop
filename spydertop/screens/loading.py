@@ -54,7 +54,9 @@ ${8}╚══════╝╚═╝        ╚═╝   ╚═════╝ �
 
 
 class LoadingFrame(Frame):
-    """A class for the loading screen"""
+    """A loading screen, displaying a dynamic logo and a progress bar.
+    This screen is shown when the model is in a loading state, fetching
+    data and processing records."""
 
     _model: AppModel
     _label: Label

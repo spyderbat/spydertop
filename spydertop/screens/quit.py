@@ -22,7 +22,7 @@ from spydertop.utils import ExtendedParser
 
 
 class QuitFrame(Frame):
-    """A class to show the quitting screen"""
+    """A quitting screen that provides a last chance to submit feedback for new users"""
 
     _model: AppModel
     _single_column = Layout([1])

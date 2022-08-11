@@ -20,7 +20,8 @@ from spydertop.utils import ExtendedParser, add_palette
 
 
 class HelpFrame(Frame):
-    """A class to show the help screen"""
+    """A help screen, containing a list of key binds and helpful information.
+    This is the closest thing to a manual currently available."""
 
     _model: AppModel
 

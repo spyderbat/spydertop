@@ -7,6 +7,7 @@
 
 """
 A feedback screen, allowing users to provide feedback about the application
+and providing a collection of links to resources.
 """
 
 from asciimatics.screen import Screen
@@ -19,7 +20,7 @@ from spydertop.utils import ExtendedParser, add_palette
 
 
 class FeedbackFrame(Frame):
-    """A class to show the feedback screen"""
+    """A feedback screen with a collection of support links"""
 
     _model: AppModel
     _feedback_widget: TextBox

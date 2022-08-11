@@ -16,7 +16,7 @@ from asciimatics.widgets import Button, Layout, Frame, Widget
 
 
 class Footer(Layout):
-    """A footer class to handle the creation and resetting of the buttons widgets
+    """A footer layout to handle the creation and resetting of the buttons widgets
     as well as click handlers."""
 
     _buttons: List = []

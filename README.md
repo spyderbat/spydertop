@@ -91,3 +91,30 @@ default:
     source:  DEFAULT_SOURCE_ID # optional
     api_url: apr.prod.spyderbat.com # optional
 ```
+
+## Development
+
+For development, Spydertop can be installed with the `--editable` flag in `pip` as long as you have the Spyderbat API library installed. Spydertop works well inside of a Python virtual environment, so using one is recommended.
+
+```sh
+# in the spydertop repository:
+
+# setup development environment
+python -m venv .env
+source .env/bin/activate
+
+# install Spyderbat APIs
+SPTPWD=$(pwd)
+cd /tmp
+git clone https://github.com/spyderbat/api_examples.git
+cd api_examples/python
+pip install .
+cd $SPTPWD
+
+# install spydertop for development
+pip install --editable .
+```
+
+In the virtual environment, after editing and saving a file, the `spydertop` command will automatically be updated.
+
+See the [Project Structure](./structure.md) for a walk through of Spydertop's code base.

@@ -6,7 +6,8 @@
 #
 
 """
-The setup frame, containing a form to select the behavior of the tool.
+The setup frame, containing controls for the settings
+contained in Spydertop.
 """
 
 # Contents:
@@ -207,7 +208,8 @@ OPTIONS = {
 
 
 class SetupFrame(Frame):
-    """The setup frame, containing a form to select the behavior of the tool."""
+    """The setup frame, containing a form to select the behavior of the tool.
+    This frame is displayed as a modal on top of the main frame."""
 
     _model: AppModel
     _disable_change: bool
