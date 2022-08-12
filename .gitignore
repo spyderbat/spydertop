@@ -1,7 +1,14 @@
+# python caches
 *.egg-info
 __pycache__
 .mypy_cache
 .env
+
+# development
 /build
-.vscode
 /dist
+.vscode/settings.json
+
+# files created by spydertop
+*.json.gz
+spydertop.log

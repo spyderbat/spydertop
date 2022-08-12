@@ -118,3 +118,7 @@ pip install --editable .
 In the virtual environment, after editing and saving a file, the `spydertop` command will automatically be updated.
 
 See the [Project Structure](./structure.md) for a walk through of Spydertop's code base.
+
+## Debugging
+
+If you are using VSCode, `launch.json` is configured to run Spydertop with the python extension's debugger. This runs the module as a python file instead of through the command line, so command line arguments can be added in `__init__.py`.

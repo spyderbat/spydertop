@@ -14,7 +14,8 @@ import re
 import traceback
 from datetime import datetime, timezone
 from textwrap import TextWrapper
-from typing import Callable, List, Tuple
+from typing import Any, Callable, List, Optional, Tuple
+import logging
 
 import click
 from asciimatics.screen import Screen
@@ -229,18 +230,33 @@ class DelayedLog:
 
     _logs: List[Tuple[int, str]] = []
     log_level: int
+    logger: Optional[logging.Logger] = None
 
-    LOG_LEVELS = ["DEBUG", "INFO", "WARN", "ERR"]
-    DEBUG = 0
-    INFO = 1
-    WARN = 2
-    ERR = 3
-    LOG_FG_COLORS = ["black", "black", "black", "black"]
-    LOG_BG_COLORS = ["blue", "white", "yellow", "red"]
+    DEBUG = logging.DEBUG
+    INFO = logging.INFO
+    WARN = logging.WARN
+    ERR = logging.ERROR
+    LOG_FG_COLORS = {
+        logging.DEBUG: "black",
+        logging.INFO: "black",
+        logging.WARN: "black",
+        logging.ERROR: "black",
+    }
+    LOG_BG_COLORS = {
+        logging.DEBUG: "blue",
+        logging.INFO: "white",
+        logging.WARN: "yellow",
+        logging.ERROR: "red",
+    }
 
     def __init__(self):
         # require log_level to be set before logging
         pass
+
+    def initialize_development_logging(self):
+        """Initialize logging for development purposes, saving to a file."""
+        logging.basicConfig(level=self.log_level, filename="spydertop.log")
+        self.logger = logging.getLogger("spydertop")
 
     def dump(self):
         """Print all logs to the console."""
@@ -248,35 +264,37 @@ class DelayedLog:
             for line in log_lines.split("\n"):
                 click.echo(
                     click.style(
-                        f"[{self.LOG_LEVELS[level]}]",
-                        fg=self.LOG_FG_COLORS[level],
-                        bg=self.LOG_BG_COLORS[level],
+                        f"[{logging.getLevelName(level)}]",
+                        fg=self.LOG_FG_COLORS.get(level, None),
+                        bg=self.LOG_BG_COLORS.get(level, None),
                     ),
                     nl=False,
                 )
                 click.echo(f": {line}")
         self._logs = []
 
-    def log(self, message: str, log_level: int = 0):
+    def log(self, *messages: Any, log_level: int = logging.NOTSET):
         """Log a message to the console, by default at DEBUG level."""
+        if self.logger is not None:
+            self.logger.log(log_level, " ".join([str(_) for _ in messages]))
         if log_level >= self.log_level:
-            self._logs.append((log_level, str(message)))
+            self._logs.append((log_level, " ".join([str(_) for _ in messages])))
 
-    def debug(self, message: str):
+    def debug(self, *messages: Any):
         """Log an info message to the console."""
-        self.log(message, self.DEBUG)
+        self.log(*messages, log_level=self.DEBUG)
 
-    def info(self, message: str):
+    def info(self, *messages: Any):
         """Log an info message to the console."""
-        self.log(message, self.INFO)
+        self.log(*messages, log_level=self.INFO)
 
-    def warn(self, message: str):
+    def warn(self, *messages: Any):
         """Log a warning message to the console."""
-        self.log(message, self.WARN)
+        self.log(*messages, log_level=self.WARN)
 
-    def err(self, message: str):
+    def err(self, *messages: Any):
         """Log an error message to the console."""
-        self.log(message, self.ERR)
+        self.log(*messages, log_level=self.ERR)
 
     def traceback(self, exception: Exception):
         """Log a traceback to the console."""
@@ -286,7 +304,7 @@ class DelayedLog:
                     type(exception), exception, exception.__traceback__
                 )
             ),
-            self.DEBUG,
+            log_level=self.DEBUG,
         )
 
     def __del__(self):

@@ -84,12 +84,14 @@ class Config:
         confirm: bool,
         log_level: str,
     ):
-        # allow for logging from the underlying library if it is requested
-        if log_level == "ASCIIMATICS":
-            log_level = "DEBUG"
-            logging.basicConfig(level=logging.DEBUG, filename="spydertop.log")
-
-        log.log_level = log.LOG_LEVELS.index(log_level)
+        # allow for logging from the underlying library
+        # and saving to a file if it is requested
+        if log_level.endswith("+"):
+            log_level = log_level[:-1]
+            log.log_level = logging.getLevelName(log_level)
+            log.initialize_development_logging()
+        else:
+            log.log_level = logging.getLevelName(log_level)
 
         try:
             config_default = self._load_config()

@@ -14,3 +14,10 @@
 
 # see the cli function in cli.py for the entry point
 from spydertop.cli import cli
+
+if __name__ == "__main__":
+    # pylint: disable=no-value-for-parameter
+
+    # add arguments as an array of strings as they
+    # would come from the command line for debugging
+    cli(["--log-level", "DEBUG+"])
