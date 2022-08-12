@@ -338,7 +338,7 @@ class CustomTextWrapper(TextWrapper):
             max_lines=None,
         )
 
-    def _wrap_chunks(self, chunks: list[str]) -> list[str]:
+    def _wrap_chunks(self, chunks: List[str]) -> List[str]:
         """
         Override the default _wrap_chunks to remove the color escape codes
         from the width calculations.
