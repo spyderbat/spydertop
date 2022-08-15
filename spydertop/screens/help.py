@@ -8,6 +8,7 @@
 """
 The help screen, shown when F1 is pressed
 """
+import sys
 
 from asciimatics.screen import Screen
 from asciimatics.widgets import Frame, Layout, Button
@@ -17,6 +18,11 @@ from asciimatics.event import KeyboardEvent
 from spydertop.model import AppModel
 from spydertop.widgets import FuncLabel, Padding
 from spydertop.utils import ExtendedParser, add_palette
+
+if sys.version_info >= (3, 8):
+    from importlib import metadata
+else:
+    import importlib_metadata as metadata
 
 
 class HelpFrame(Frame):
@@ -47,7 +53,9 @@ class HelpFrame(Frame):
             FuncLabel(
                 lambda: add_palette(
                     """\
-${{{label},1}}spydertop 0.4.4 - (C) 2022 Spyderbat
+${{{label},1}}spydertop """
+                    + metadata.version("spydertop")
+                    + """ - (C) 2022 Spyderbat
 ${{{label},1}}Styled after htop.\
 """,
                     model,

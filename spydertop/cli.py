@@ -184,6 +184,7 @@ Defaults to WARN",
     envvar="SPYDERTOP_LOG_LEVEL",
 )
 @click.argument("timestamp", type=Timestamp(), required=False)
+@click.version_option()
 def cli(
     organization, machine, input_file, output, timestamp, duration, confirm, log_level
 ):

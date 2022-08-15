@@ -1,6 +1,6 @@
 # Spydertop Tool
 
-Spydertop, is a tool that provides htop-like functionality for any point in time, on any of your Spyderbat-enabled machines. This allows you to see what happened on your server five days ago as if you were logged in and monitoring it at that moment.
+Spydertop is a tool that provides htop-like functionality for any point in time, on any of your Spyderbat-enabled machines. Utilizing Spyderbat’s kernel-level system monitoring and public APIs, Spydertop allows analysts to look into system anomalies days or even months after they occur.
 
 ## Quick Start
 
@@ -21,24 +21,6 @@ docker run -it -v /etc/localtime:/etc/localtime spyderbat/spydertop [ARGS]
 ```
 
 ## Installation
-
-### Quick Install
-
-Run [install.sh](install.sh). This will install spydertop using the `pip` command in the current Python environment.
-
-On your first run of `spydertop`, it will guide you through setting up a configuration if you do not have one already.
-
-### Manual
-
-Spydertop requires python with setup-tools to install, and the Python version of the Spyderbat API. This can be installed from the [GitHub page](https://github.com/spyderbat/api_examples/tree/main/python) or using the following commands:
-
-```sh
-git clone https://github.com/spyderbat/api_examples.git
-cd api_examples/python
-pip install .
-```
-
-The install command can then be run in this directory:
 
 ```sh
 pip install .
@@ -94,7 +76,7 @@ default:
 
 ## Development
 
-For development, Spydertop can be installed with the `--editable` flag in `pip` as long as you have the Spyderbat API library installed. Spydertop works well inside of a Python virtual environment, so using one is recommended.
+For development, Spydertop can be installed with the `--editable` flag in `pip`. Spydertop works well inside of a Python virtual environment, so using one is recommended.
 
 ```sh
 # in the spydertop repository:
@@ -102,14 +84,6 @@ For development, Spydertop can be installed with the `--editable` flag in `pip` 
 # setup development environment
 python -m venv .env
 source .env/bin/activate
-
-# install Spyderbat APIs
-SPTPWD=$(pwd)
-cd /tmp
-git clone https://github.com/spyderbat/api_examples.git
-cd api_examples/python
-pip install .
-cd $SPTPWD
 
 # install spydertop for development
 pip install --editable .
