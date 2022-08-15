@@ -42,7 +42,7 @@ RecordInternal = NewType(
 Record = NewType("Record", Dict[str, RecordInternal])
 
 
-class AppModel:
+class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """
     The main app model for the application, containing all logic necessary
     to asynchronously fetch and cache data from the Spyderbat API. It also

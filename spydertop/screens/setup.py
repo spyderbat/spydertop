@@ -42,6 +42,7 @@ from spydertop.columns import (
     LISTENING_SOCKET_COLUMNS,
 )
 from spydertop.model import AppModel
+from ..utils import is_event_in_widget
 
 # the following are a set of functions that are used to fill in the options
 # some of these are only necessary due to python's lambda behavior
@@ -271,12 +272,7 @@ class SetupFrame(Frame):
                 if self._on_death is not None:
                     self._on_death()
         elif isinstance(event, MouseEvent):
-            if (
-                self.rebase_event(event).x < 0
-                or self.rebase_event(event).x > self.canvas.width
-                or self.rebase_event(event).y < 0
-                or self.rebase_event(event).y > self.canvas.height
-            ) and (event.buttons != 0):
+            if is_event_in_widget(event, self) and (event.buttons != 0):
                 # when a click is outside the modal, close it
                 self._scene.remove_effect(self)
                 self._on_death()
@@ -345,6 +341,8 @@ class SetupFrame(Frame):
             )
             return textbox
 
+        raise ValueError(f"Unknown type for widget {type(values)}")
+
     # The only way to remove and re-add widgets in Asciimatics is to use
     # Layout.clear_widgets(). Therefore, we need to be able to easily rebuild the entire
     # UI on each selection change
@@ -359,11 +357,9 @@ class SetupFrame(Frame):
         self._disable_change = True
         self._has_textbox = False
 
+        second_col_selected = self._layout.get_current_widget() == self._second_column
+
         # First Column
-        if self._layout.get_current_widget() == self._second_column:
-            second_col_selected = True
-        else:
-            second_col_selected = False
         self._layout.clear_widgets()
         self._layout.add_widget(self._main_column, 0)
 

@@ -5,6 +5,8 @@
 # Copyright 2022 Spyderbat, Inc. All rights reserved.
 #
 
+# pylint: disable=too-many-lines
+
 """
 The main frame for the tool. This frame contains the record list and usage metrics,
 as well as showing all the menu buttons.
@@ -14,9 +16,9 @@ from math import nan
 import re
 from typing import Any, Dict, List, Optional, Tuple
 import urllib
-import pyperclip
 import webbrowser
 
+import pyperclip
 from asciimatics.screen import Screen
 from asciimatics.widgets import (
     Frame,
@@ -61,7 +63,7 @@ from spydertop.widgets import FuncLabel, Meter, Padding
 from spydertop.screens.footer import Footer
 
 
-class MainFrame(Frame):
+class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     """The main frame for the application. This frame is responsible
     for taking user input and determining how much to update the screen."""
 
@@ -91,6 +93,7 @@ class MainFrame(Frame):
 
     # -- initialization -- #
     def __init__(self, screen, model: AppModel) -> None:
+        # pylint: disable=duplicate-code
         super().__init__(
             screen,
             screen.height,
@@ -236,7 +239,7 @@ class MainFrame(Frame):
         self._widgets_initialized = True
 
     # -- overrides -- #
-    def update(self, frame_no):
+    def update(self, frame_no):  # pylint: disable=too-many-branches,too-many-statements
         conf = self._model.config
 
         # if model is in failure state, raise next scene
@@ -245,7 +248,7 @@ class MainFrame(Frame):
         # early exit if model is not ready
         if not self._model.loaded:
             return
-        elif not self._widgets_initialized:
+        if not self._widgets_initialized:
             self._init_widgets()
 
         # update model (if needed, at most 4 times per second)
@@ -395,13 +398,10 @@ class MainFrame(Frame):
         if isinstance(event, KeyboardEvent):
             if event.key_code in {ord(k) for k in key_map}:
                 key_map[chr(event.key_code)]()
-                return
+                return None
             if event.key_code in range(Screen.KEY_F11, Screen.KEY_F1 + 1):
                 self._footer.click(-event.key_code - 2)
-            if (
-                event.key_code == Screen.KEY_TAB
-                or event.key_code == Screen.KEY_BACK_TAB
-            ):
+            if event.key_code in {Screen.KEY_TAB, Screen.KEY_BACK_TAB}:
                 current_tab_index = 0
                 for i, tab in enumerate(self._tabs):
                     if tab.text.lower() == self._model.config["tab"]:
@@ -412,7 +412,7 @@ class MainFrame(Frame):
                     (current_tab_index + offset) % len(self._tabs)
                 ].text.lower()
                 self._switch_to_tab(next_tab)
-                return
+                return None
 
         # if no widget is focused, focus the table widget
         try:
@@ -501,7 +501,7 @@ class MainFrame(Frame):
 
         return rows, sortable_rows
 
-    def _build_process_options(
+    def _build_process_options(  # pylint: disable=too-many-locals
         self,
     ) -> Tuple[List, List]:
         """Build options for the processes tab. This requires more work than
@@ -602,8 +602,7 @@ class MainFrame(Frame):
                 if rec_id == id_to_ed:
                     tree[rec_id] = (not branch[0], branch[1])
                     return
-                else:
-                    recursive_enable_disable(branch[1], id_to_ed)
+                recursive_enable_disable(branch[1], id_to_ed)
 
         recursive_enable_disable(self._model.tree, row[1][0])
         self.needs_update = True

@@ -14,7 +14,7 @@ from typing import Callable, Optional
 from asciimatics.widgets import Frame, Text, Layout, Widget
 from asciimatics.screen import Screen
 from asciimatics.event import KeyboardEvent, MouseEvent
-from spydertop.utils import COLOR_REGEX, ExtendedParser
+from spydertop.utils import COLOR_REGEX, ExtendedParser, is_event_in_widget
 
 from spydertop.widgets import FuncLabel
 
@@ -27,7 +27,7 @@ class InputModal(Frame):
     _on_submit: Optional[Callable[[str], None]]
     _on_death: Optional[Callable[[], None]]
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         screen: Screen,
         value=None,
@@ -94,25 +94,20 @@ class InputModal(Frame):
                     self._on_submit(self._text_input.value)
                 self._scene.remove_effect(self)
                 self._on_death()
-                return
+                return None
             if event.key_code == Screen.KEY_ESCAPE:
                 # on escape, clear the input
                 self._on_change(None)
                 self._scene.remove_effect(self)
                 self._on_death()
-                return
+                return None
         elif isinstance(event, MouseEvent):
-            if (
-                self.rebase_event(event).x < 0
-                or self.rebase_event(event).x > self.canvas.width
-                or self.rebase_event(event).y < 0
-                or self.rebase_event(event).y > self.canvas.height
-            ) and (event.buttons != 0):
+            if is_event_in_widget(event, self) and (event.buttons != 0):
                 # when a click is outside the modal, close it
                 self._on_change(None)
                 self._scene.remove_effect(self)
                 self._on_death()
-                return
+                return None
 
         return super().process_event(event)
 
@@ -120,7 +115,7 @@ class InputModal(Frame):
 class NotificationModal(Frame):
     """A modal frame for displaying a notification"""
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         screen: Screen,
         text: str,
@@ -172,7 +167,7 @@ class NotificationModal(Frame):
                 or self.delete_count is None
             ):
                 self._scene.remove_effect(self)
-                return
+                return None
         if isinstance(event, MouseEvent) and event.buttons != 0:
             self._scene.remove_effect(self)
         return self._parent.process_event(event)

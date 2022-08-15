@@ -49,7 +49,7 @@ from spydertop.utils import (
 )
 
 
-class ConfigurationFrame(Frame):
+class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
     """Frame for initial configuration of the application
     to prepare for API access. This frame has several views,
     and switches between them by clearing the layout and rebuilding it."""
@@ -62,7 +62,7 @@ class ConfigurationFrame(Frame):
     _needs_build: bool = True
 
     def __init__(self, screen: Screen, model: AppModel) -> None:
-        super().__init__(
+        super().__init__(  # pylint: disable=duplicate-code
             screen,
             screen.height,
             screen.width,
@@ -123,7 +123,9 @@ class ConfigurationFrame(Frame):
                     self._on_submit = None
         return super().process_event(event)
 
-    def build_next_layout(self) -> None:
+    def build_next_layout(  # pylint: disable=too-many-branches,too-many-statements,too-many-return-statements
+        self,
+    ) -> None:
         """Determines which layout to display next based on the state of the config"""
 
         self._needs_build = False
@@ -447,7 +449,7 @@ Once you have a source configured, you can continue.\
         log.debug(self.config)
         self.build_error("An unexpected error occurred")
 
-    def build_question(
+    def build_question(  # pylint: disable=too-many-arguments
         self,
         question: str,
         answers: List[Tuple[List, Callable]],
@@ -571,7 +573,9 @@ clicking on 'Create API Key'.\
         self.layout.add_widget(Label(message, align="^"), 1)
         self.layout.add_widget(Button("Quit", self.quit), 1)
 
-    def build_timepicker(self) -> None:
+    def build_timepicker(  # pylint: disable=too-many-locals,too-many-statements
+        self,
+    ) -> None:
         """Construct a layout that asks the user to select a start time"""
         self.layout.add_widget(
             FuncLabel(

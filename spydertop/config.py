@@ -35,7 +35,7 @@ def dump_columns(columns) -> Dict[str, bool]:
     return {column[0]: column[5] for column in columns}
 
 
-class Config:
+class Config:  # pylint: disable=too-many-instance-attributes
     """
     A container for the various arguments passed in to spydertop
     """
@@ -73,7 +73,7 @@ class Config:
     }
     settings_changed: bool = False
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments,too-many-statements
         self,
         org: Optional[str],
         source: Optional[str],

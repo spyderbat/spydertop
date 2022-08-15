@@ -27,7 +27,7 @@ class Meter(Widget):
     theme.
     """
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         label: str,
         values: List[float],
@@ -66,7 +66,7 @@ class Meter(Widget):
     def required_height(self, offset, width):
         return 1  # meters are always 1-line
 
-    def update(self, frame_no):
+    def update(self, frame_no):  # pylint: disable=too-many-locals
         """
         Draws the metric onto the screen as:
           LBL[|||||||||||       VALUE]
@@ -247,7 +247,7 @@ class FuncLabel(Widget):
         color="label",
         indent="",
         **kwargs,
-    ):
+    ):  # pylint: disable=too-many-arguments
         """
         :param generator: a function which generates the text to display on screen.
             This function is assumed to have no side effects, and can be run often

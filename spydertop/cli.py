@@ -54,7 +54,7 @@ class Timestamp(click.ParamType):
                     timestamp = time.time() + timestamp
                 return timestamp
             except ValueError:
-                self.fail(
+                return self.fail(
                     f"{value} is not a valid timestamp. "
                     "Please use a valid timestamp or a relative time "
                     "using the following units: s, m, h, d, y",
@@ -85,7 +85,7 @@ class Duration(click.ParamType):
             timestamp = convert_to_seconds(value)
             return timestamp
         except ValueError as exc:
-            self.fail(f"Unable to convert input into duration: {value} {exc}")
+            return self.fail(f"Unable to convert input into duration: {value} {exc}")
 
 
 class FileOrUrl(click.ParamType):
@@ -105,22 +105,21 @@ class FileOrUrl(click.ParamType):
         if exists(value):
             try:
                 # first, determine if it is JSON or GZIP
-                tmp = open(value, "rb")
+                tmp = open(value, "rb")  # pylint: disable=consider-using-with
                 magic_bytes = tmp.read(2)
                 tmp.close()
                 if magic_bytes == b"\x1f\x8b":
                     # GZIP file detected
                     return gzip.open(value, "rt")
-                else:
-                    # other file detected, assuming JSON
-                    return open(value, "r", encoding="utf-8")
+                # other file detected, assuming JSON
+                return open(value, "r", encoding="utf-8")
 
             except FileNotFoundError as exc:
-                self.fail(f"Unable to open file {value}: {exc}")
+                return self.fail(f"Unable to open file {value}: {exc}")
         else:
             # first see if it is a file, but a non-existent one
             if value.endswith(".json") or value.endswith(".json.gz"):
-                self.fail(f"File {value} does not exist")
+                return self.fail(f"File {value} does not exist")
             # convert base domains into a full url base
             return f"https://{value}" if "http" not in value else value
 
@@ -185,7 +184,7 @@ Defaults to WARN",
 )
 @click.argument("timestamp", type=Timestamp(), required=False)
 @click.version_option()
-def cli(
+def cli(  # pylint: disable=too-many-arguments
     organization, machine, input_file, output, timestamp, duration, confirm, log_level
 ):
     """

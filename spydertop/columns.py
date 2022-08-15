@@ -479,19 +479,20 @@ CONNECTION_COLUMNS = [
 ########################### Flags ###########################
 
 
-def color_severity(_m, f):
+def color_severity(_m, f) -> str:
     """Format the severity of a flag."""
     severity = f["severity"]
     if severity == "info":
         return "${8}I"
-    elif severity == "low":
+    if severity == "low":
         return "L"
-    elif severity == "medium":
+    if severity == "medium":
         return "${11}M"
-    elif severity == "high":
+    if severity == "high":
         return "${3,1}H"
-    elif severity == "critical":
+    if severity == "critical":
         return "${1,1}C"
+    return "${8,1}?"
 
 
 SEVERITIES = {"info": -1, "low": 0, "medium": 1, "high": 2, "critical": 3}

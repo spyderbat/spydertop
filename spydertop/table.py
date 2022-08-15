@@ -26,7 +26,7 @@ from spydertop.config import Config
 InternalRow = NewType("InternalRow", Tuple[List[str], List[Any]])
 
 
-class Table(Widget):
+class Table(Widget):  # pylint: disable=too-many-instance-attributes
     """
     The main record table for the application. This table
     handles the sorting, filtering, and display of the records.
@@ -64,7 +64,7 @@ class Table(Widget):
         self._config = model.config
         self.tree = tree
 
-    def update(self, frame_no):
+    def update(self, frame_no):  # pylint: disable=too-many-branches,too-many-locals
         # select the followed id
         if self._state["id_to_follow"] is not None and self._config["follow_record"]:
             for i, row in enumerate(self._filtered_rows):
@@ -173,52 +173,54 @@ class Table(Widget):
                     x_offset += width + 1
             y_offset += 1
 
-    def process_event(self, event):
+    def process_event(  # pylint: disable=too-many-return-statements,too-many-branches
+        self, event
+    ):
         if isinstance(event, KeyboardEvent):
             if event.key_code == Screen.KEY_UP:
                 self.value = max(0, self._state["selected_row"] - 1)
-                return
+                return None
             if event.key_code == Screen.KEY_DOWN:
                 self.value = min(
                     len(self._filtered_rows) - 1, self._state["selected_row"] + 1
                 )
-                return
+                return None
             if event.key_code == Screen.KEY_LEFT:
                 self._horizontal_offset = max(0, self._horizontal_offset - 1)
-                return
+                return None
             if event.key_code == Screen.KEY_RIGHT:
                 self._horizontal_offset += 1
-                return
+                return None
             if event.key_code == 337:
                 self.value = max(0, self._state["selected_row"] - 5)
-                return
+                return None
             if event.key_code == 336:
                 self.value = min(
                     len(self._filtered_rows) - 1, self._state["selected_row"] + 5
                 )
-                return
+                return None
             if event.key_code == 393:
                 self._horizontal_offset = max(0, self._horizontal_offset - 5)
-                return
+                return None
             if event.key_code == 402:
                 self._horizontal_offset += 5
-                return
+                return None
             if event.key_code == Screen.KEY_PAGE_UP:
                 self.value = max(0, self._state["selected_row"] - self._h + 1)
-                return
+                return None
             if event.key_code == Screen.KEY_PAGE_DOWN:
                 self.value = min(
                     len(self._filtered_rows) - 1,
                     self._state["selected_row"] + self._h - 1,
                 )
-                return
+                return None
             if event.key_code == Screen.KEY_HOME:
                 self.value = 0
-                return
+                return None
             if event.key_code == Screen.KEY_END:
                 self.value = len(self._filtered_rows) - 1
-                return
-        if isinstance(event, MouseEvent):
+                return None
+        if isinstance(event, MouseEvent):  # pylint: disable=too-many-nested-blocks
             if event.buttons & event.LEFT_CLICK != 0:
                 this_x, this_y = self.get_location()
                 relative_x = event.x - this_x
@@ -244,7 +246,7 @@ class Table(Widget):
                 else:
                     # select the clicked row
                     self.value = relative_y - 1 + self._vertical_offset
-                return
+                return None
         return event
 
     def required_height(self, offset, width):
@@ -329,7 +331,7 @@ class Table(Widget):
         if self._state["selected_row"] >= len(self._filtered_rows):
             self.value = 0
 
-    def _filter_predicate(
+    def _filter_predicate(  # pylint: disable=too-many-return-statements
         self, row: InternalRow, column_matches: List[str], rest: str
     ) -> bool:
         # filter by specific columns
@@ -439,7 +441,7 @@ class Table(Widget):
         sorted_rows = []
         for i, row in enumerate(level):
             branch = tree[row[1][0]]
-            new_displayable = [_ for _ in row[0]]
+            new_displayable = list(row[0])
             prefix = self._make_tree_prefix(
                 depth,
                 branch is None
@@ -515,8 +517,7 @@ class Table(Widget):
     def value(self, value: int):
         if len(self._filtered_rows) == 0:
             return
-        if value < 0:
-            value = 0
+        value = max(value, 0)
         if value >= len(self._filtered_rows):
             value = len(self._filtered_rows) - 1
         self._set_state(selected_row=value)

@@ -28,6 +28,7 @@ class FailureFrame(Frame):
     _time_button: Button
 
     def __init__(self, screen: Screen, model: AppModel) -> None:
+        # pylint: disable=duplicate-code
         super().__init__(
             screen,
             screen.height,
@@ -90,6 +91,7 @@ class FailureFrame(Frame):
         )
         super().update(frame_no)
 
+    # pylint: disable=duplicate-code
     def process_event(self, event):
         if isinstance(event, KeyboardEvent):
             if event.key_code in {ord("q"), ord("Q")}:

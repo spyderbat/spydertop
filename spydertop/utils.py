@@ -45,25 +45,25 @@ def pretty_time(time: float) -> str:
     return f"${{6}}{hours}h${{7}}{minutes:02d}:{seconds:02d}"
 
 
-def pretty_datetime(d_time: datetime) -> str:
+def pretty_datetime(  # pylint: disable=too-many-return-statements
+    d_time: datetime,
+) -> str:
     """Format a datetime in a short format, and color based on the distance from now"""
     now = datetime.now(tz=d_time.tzinfo)
     delta = now - d_time
     if delta.days == 0:
         if delta.seconds < 60:
             return f"${{2}}{delta.seconds} seconds ago"
-        elif delta.seconds < 3600:
+        if delta.seconds < 3600:
             return f"${{2}}{delta.seconds // 60} minutes ago"
-        else:
-            return f"${{3}}{delta.seconds // 3600} hours ago"
-    elif delta.days == 1:
+        return f"${{3}}{delta.seconds // 3600} hours ago"
+    if delta.days == 1:
         return "${3}Yesterday"
-    elif delta.days < 7:
+    if delta.days < 7:
         return f"${{3}}{delta.days} days ago"
-    elif delta.days < 365:
+    if delta.days < 365:
         return f"${{1}}{delta.days // 7} weeks ago"
-    else:
-        return f"${{1}}{delta.days // 365} years ago"
+    return f"${{1}}{delta.days // 365} years ago"
 
 
 def pretty_address(ip_addr: int, port: int) -> str:
@@ -89,11 +89,10 @@ def pretty_bytes(n_bytes: int) -> str:
     """Format a number of bytes in a human readable format, with coloring"""
     for (suffix, color) in [("", None), ("K", None), ("M", 6), ("G", 2), ("T", 1)]:
         if n_bytes < 1000:
-            if suffix == "K" or suffix == "":
+            if suffix in {"K", ""}:
                 return f"{int(n_bytes)}{suffix}"
-            else:
-                precision = 2 if n_bytes < 10 else 1 if n_bytes < 100 else 0
-                return f"${{{color}}}{n_bytes:.{precision}f}{suffix}"
+            precision = 2 if n_bytes < 10 else 1 if n_bytes < 100 else 0
+            return f"${{{color}}}{n_bytes:.{precision}f}{suffix}"
         n_bytes /= 1024
     return f"${{1,1}}{n_bytes}P"
 
@@ -127,6 +126,16 @@ def get_timezone(model):
     """Get the timezone based on the config"""
     return (
         timezone.utc if model.config["utc_time"] else datetime.now().astimezone().tzinfo
+    )
+
+
+def is_event_in_widget(event, widget):
+    """Determine if the event is in the area of the widget"""
+    return (
+        widget.rebase_event(event).x < 0
+        or widget.rebase_event(event).x > widget.canvas.width
+        or widget.rebase_event(event).y < 0
+        or widget.rebase_event(event).y > widget.canvas.height
     )
 
 
@@ -327,7 +336,7 @@ class CustomTextWrapper(TextWrapper):
     line to line.
     """
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         width: int,
         initial_indent: str = "",
@@ -355,7 +364,9 @@ class CustomTextWrapper(TextWrapper):
             max_lines=None,
         )
 
-    def _wrap_chunks(self, chunks: List[str]) -> List[str]:
+    def _wrap_chunks(  # pylint: disable=too-many-branches
+        self, chunks: List[str]
+    ) -> List[str]:
         """
         Override the default _wrap_chunks to remove the color escape codes
         from the width calculations.

@@ -62,6 +62,7 @@ class LoadingFrame(Frame):
     _label: Label
 
     def __init__(self, screen: Screen, model: AppModel) -> None:
+        # pylint: disable=duplicate-code
         super().__init__(
             screen,
             screen.height,
@@ -120,21 +121,18 @@ class LoadingFrame(Frame):
         if self.screen.width < 110:
             header_padding = max(round(self.screen.height / 2 - 15), 0)
             return ("\n" * header_padding) + LOGO + "\n" + HUGE_NAME
-        else:
-            header_padding = max(round(self.screen.height / 2 - 9), 0)
-            name_len = len(
-                re.sub(COLOR_REGEX, "", HUGE_NAME.split("\n", maxsplit=1)[0])
-            )
-            padding = (" " * name_len + "\n") * 5
-            extended_huge_name = padding + HUGE_NAME + padding
-            return ("\n" * header_padding) + "\n".join(
-                [
-                    logoline + " " + nameline
-                    for logoline, nameline in zip(
-                        LOGO.split("\n"), extended_huge_name.split("\n")
-                    )
-                ]
-            )
+        header_padding = max(round(self.screen.height / 2 - 9), 0)
+        name_len = len(re.sub(COLOR_REGEX, "", HUGE_NAME.split("\n", maxsplit=1)[0]))
+        padding = (" " * name_len + "\n") * 5
+        extended_huge_name = padding + HUGE_NAME + padding
+        return ("\n" * header_padding) + "\n".join(
+            [
+                logoline + " " + nameline
+                for logoline, nameline in zip(
+                    LOGO.split("\n"), extended_huge_name.split("\n")
+                )
+            ]
+        )
 
     def update(self, frame_no):
         self.set_theme(self._model.config["theme"])
