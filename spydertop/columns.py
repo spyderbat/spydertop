@@ -387,11 +387,13 @@ CONNECTION_COLUMNS = [
     (
         "DURATION",
         lambda m, c: pretty_time(m.timestamp - c["valid_from"])
-        if "duration" not in c or c["valid_to"] > m.timestamp
+        if "duration" not in c or "valid_to" not in c or c["valid_to"] > m.timestamp
         else pretty_time(c["duration"]),
         "<",
         9,
-        lambda m, c: c.get("duration", m.timestamp - c["valid_from"]),
+        lambda m, c: m.timestamp - c["valid_from"]
+        if "duration" not in c or "valid_to" not in c or c["valid_to"] > m.timestamp
+        else c["duration"],
         True,
     ),
     (

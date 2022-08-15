@@ -252,21 +252,19 @@ logging into your account on the website.\
                 if len(self.cache["orgs"]) == 1:
                     self.set_org(self.cache["orgs"][0])
                 if len(self.cache["orgs"]) > 1:
-                    if self.config.org is None:
-                        index = 0
-                    else:
-                        try:
-                            index = [o["uid"] for o in self.cache["orgs"]].index(
-                                self.config.org
-                            )
-                        except ValueError:
-                            index = 0
-
                     orgs = sorted(
                         self.cache["orgs"],
                         key=lambda o: o.get("total_sources", 0),
                         reverse=True,
                     )
+
+                    if self.config.org is None:
+                        index = 0
+                    else:
+                        try:
+                            index = [o["uid"] for o in orgs].index(self.config.org)
+                        except ValueError:
+                            index = 0
 
                     self.build_question(
                         "Please select an organization",

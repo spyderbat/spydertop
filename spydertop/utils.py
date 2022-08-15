@@ -42,8 +42,7 @@ def pretty_time(time: float) -> str:
                 return f"{microseconds}μs"
             return f"{milliseconds}ms"
         return f"{minutes}:{seconds:02d}.{centiseconds:02d}"
-    else:
-        return f"${{6}}{hours}h${{7}}{minutes:02d}:{seconds:02d}"
+    return f"${{6}}{hours}h${{7}}{minutes:02d}:{seconds:02d}"
 
 
 def pretty_datetime(d_time: datetime) -> str:
