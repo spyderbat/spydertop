@@ -43,8 +43,8 @@ jobs:
         uses: svenstaro/upload-release-action@v2
         with:
           file: dist/spydertop-${{ steps.version.outputs.versionfull }}-py3-none-any.whl
-          tag_name: ${{ steps.version.outputs.version }}
-          asset_name: spydertop-${{ steps.version.outputs.versionfull }}-py${{ matrix.python-version }}.whl
+          tag: ${{ steps.version.outputs.version }}
+          asset_name: spydertop-${{ steps.version.outputs.versionfull }}-py${{ matrix.python-version }}-none-any.whl
       # the remaining steps are publishing to external services,
       # and should only happen once
       - 
