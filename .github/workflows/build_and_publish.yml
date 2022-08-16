@@ -8,7 +8,6 @@ on:
 jobs:
   build_and_publish:
     runs-on: ubuntu-latest
-    environment: Deployment
     strategy:
       matrix:
         python-version: ["3.6", "3.10"]
