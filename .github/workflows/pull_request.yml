@@ -22,8 +22,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: |
-            '**/setup.cfg'
-            '**/pyproject.toml'
+            setup.cfg
+            pyproject.toml
       - 
         name: Install Dependencies
         run: |
