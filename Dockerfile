@@ -15,9 +15,8 @@ RUN git clone https://github.com/peterbrittain/asciimatics.git && \
 
 # install spydertop
 WORKDIR /spydertop
-COPY setup.py ./
-COPY spydertop spydertop
-RUN python setup.py bdist_wheel
+COPY ./ ./
+RUN pip wheel . -w dist --no-deps
 
 FROM python:3-alpine
 
