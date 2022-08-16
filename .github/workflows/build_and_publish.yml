@@ -72,5 +72,6 @@ jobs:
         if: matrix.python-version == '3.10'
         uses: docker/build-push-action@v3
         with:
+          context: .
           push: true
           tags: spyderbat/spydertop:latest,spyderbat/spydertop:${{ steps.version.outputs.version }}
