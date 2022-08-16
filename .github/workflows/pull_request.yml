@@ -1,0 +1,38 @@
+name: Lint
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  run-linters:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.6", "3.10"]
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v3
+      -  
+        name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - 
+        name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pylint .
+      - 
+        name: Run Lint (3.10)
+        if: matrix.python-version == '3.10'
+        run: |
+          pylint spydertop
+      - 
+        name: Run Lint (3.6)
+        if: matrix.python-version == '3.6'
+        run: |
+          pylint spydertop --disable=no-self-use
