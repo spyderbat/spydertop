@@ -109,21 +109,10 @@ When `needs_recalculate` triggers a recalculation of columns, `_build_options` i
 
 The `Table` object is responsible for displaying the records for the current tab in addition to sorting, filtering, and searching those records. It receives the calculated columns from the `MainFrame` and stores, sorts, then filters them. When displaying the records on screen, only the rows shown on the screen are rendered to improve responsiveness.
 
-## Building
+## Release
 
-The build process is currently manual. To push out a new version:
+Releases are triggered on the creation of a [SemVer][semver] named tag, such as `v1.3.9`. To create a release, create a tag with the version of that release, and monitor the GitHub action to ensure it runs properly.
 
-- the version numbers in [`setup.py`](./setup.py) and [`help.py`](spydertop/screens/help.py) are incremented
-- the next docker version is built and pushed using
-
-```sh
-docker build -t spyderbat/spydertop:[VERSION]
-docker push spyderbat/spydertop:[VERSION]
-docker tag spyderbat/spydertop:[VERSION] spyderbat/spydertop:latest
-docker push spyderbat/spydertop:latest
-```
-
-- the latest commits are pushed to GitHub
 
 [click_docs]: https://click.palletsprojects.com/en/8.1.x/
 [asciimatics_docs]: https://asciimatics.readthedocs.io/en/stable/
@@ -131,3 +120,4 @@ docker push spyderbat/spydertop:latest
 [layout_docs]: https://asciimatics.readthedocs.io/en/stable/widgets.html#layouts-in-more-detail
 [control_docs]: https://asciimatics.readthedocs.io/en/stable/widgets.html#flow-of-control
 [htop_github]: https://github.com/htop-dev/htop
+[semver]: https://semver.org/

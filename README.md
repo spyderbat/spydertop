@@ -1,6 +1,10 @@
-# Spydertop Tool
+# Spydertop
 
 Spydertop is a tool that provides htop-like functionality for any point in time, on any of your Spyderbat-enabled machines. Utilizing Spyderbat’s kernel-level system monitoring and public APIs, Spydertop allows analysts to look into system anomalies days or even months after they occur.
+
+## Demo:
+
+![A demo of Spydertop](https://github.com/spyderbat/spydertop/blob/main/assets/demo.gif)
 
 ## Quick Start
 
@@ -22,7 +26,16 @@ docker run -it -v /etc/localtime:/etc/localtime spyderbat/spydertop [ARGS]
 
 ## Installation
 
+Download the appropriate wheel file from the [releases page](https://github.com/spyderbat/spydertop/releases) and install with:
+
 ```sh
+pip install [WHEEL FILE]
+```
+
+If you prefer to install from source, clone this repository and run this command inside:
+
+```sh
+# note: requires setuptools >= 45
 pip install .
 ```
 
@@ -32,11 +45,11 @@ On your first run of `spydertop`, it will guide you through setting up a configu
 https://api.spyderbat.com/app/org/{ORG_ID_HERE}/dashboard
 ```
 
-Similarly, the source id can be located in the url of an investigation, or by enabling the id column in the sources list.
+Similarly, the machine id can be located in the url of an investigation, or by enabling the id column in the sources list.
 
 ## Usage
 
-Spydertop is called with options specifying the source to pull from and how that data is collected, and a timestamp. Records will be loaded from the specified source around the time, and an htop-like view will start at the exact requested time. The relative time selection bar at the bottom can be used to move forward and backward in time, and arrow keys, tab key, or mouse used to navigate the interface. More usage information is available on the help page (`h` or `<F1>`).
+Spydertop is called with options specifying the machine to pull from and how that data is collected, and a timestamp. Records will be loaded from the specified machine around that time, and an htop-like view will start at the exact requested time. The relative time selection bar at the bottom or bracket keys (`[` or `]`) can be used to move forward and backward in time, and the arrow keys, tab key, or mouse can be used to navigate the interface. More usage information is available on the help page (`h` or `<F1>`).
 
 As this tool emulates much of HTOP's functionality, more information is also available on the HTOP man page.
 
@@ -45,7 +58,7 @@ As this tool emulates much of HTOP's functionality, more information is also ava
 ```sh
 spydertop --help # print usage information
 
-# starts spydertop with the specified source
+# starts spydertop with the specified machine
 # at a point in time 5 days ago
 spydertop -g ORGUID -m MACHINEUID -- -5d
 
@@ -69,9 +82,9 @@ Spydertop uses the Spyderbat APIs, so it must have access to a valid API key, us
 # File: ~/.spyderbat-api/config.yaml
 default:
     api_key: API_KEY
-    org:     DEFAULT_ORG_ID    # optional
-    source:  DEFAULT_SOURCE_ID # optional
-    api_url: apr.prod.spyderbat.com # optional
+    org:     DEFAULT_ORG_ID     # optional
+    machine: DEFAULT_MACHINE_ID # optional
+    api_url: api.spyderbat.com  # optional
 ```
 
 ## Development
@@ -91,7 +104,7 @@ pip install --editable .
 
 In the virtual environment, after editing and saving a file, the `spydertop` command will automatically be updated.
 
-See the [Project Structure](./structure.md) for a walk through of Spydertop's code base.
+See the [Project Structure](https://github.com/spyderbat/spydertop/blob/main/structure.md) for a walk through of Spydertop's code base.
 
 ## Debugging
 
