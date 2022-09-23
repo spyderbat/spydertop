@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 import yaml
 import click
 
-from spydertop.columns import (
+from spydertop.constants.columns import (
     CONNECTION_COLUMNS,
     FLAG_COLUMNS,
     LISTENING_SOCKET_COLUMNS,

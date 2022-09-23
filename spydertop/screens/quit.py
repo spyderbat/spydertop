@@ -18,7 +18,7 @@ from asciimatics.exceptions import StopApplication
 
 from spydertop.model import AppModel
 from spydertop.widgets import FuncLabel, Padding
-from spydertop.utils import ExtendedParser
+from spydertop.utils.types import ExtendedParser
 
 
 class QuitFrame(Frame):

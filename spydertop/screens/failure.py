@@ -16,7 +16,7 @@ from asciimatics.exceptions import NextScene, StopApplication
 from asciimatics.event import KeyboardEvent
 
 from spydertop.model import AppModel
-from spydertop.utils import ExtendedParser
+from spydertop.utils.types import ExtendedParser
 from spydertop.widgets import Padding, FuncLabel
 
 

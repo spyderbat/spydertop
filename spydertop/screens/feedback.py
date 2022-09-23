@@ -16,7 +16,8 @@ from asciimatics.exceptions import NextScene
 
 from spydertop.model import AppModel
 from spydertop.widgets import FuncLabel, Padding
-from spydertop.utils import ExtendedParser, add_palette
+from spydertop.utils import add_palette
+from spydertop.utils.types import ExtendedParser
 
 
 class FeedbackFrame(Frame):

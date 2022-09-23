@@ -26,8 +26,9 @@ from spydertop.utils import (
     pretty_address,
     pretty_bytes,
     pretty_time,
-    PAGE_SIZE,
 )
+from spydertop.constants import PAGE_SIZE
+
 
 ########################### Processes ###########################
 

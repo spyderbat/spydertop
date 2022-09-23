@@ -43,16 +43,15 @@ from spydertop.screens.meters import (
     show_uptime,
 )
 from spydertop.screens.modals import InputModal, NotificationModal
-from spydertop.table import Table
+from spydertop.widgets import Table
 from spydertop.utils import (
-    API_LOG_TYPES,
-    BetterDefaultDict,
-    ExtendedParser,
     log,
     convert_to_seconds,
     pretty_time,
 )
-from spydertop.columns import (
+from spydertop.utils.types import BetterDefaultDict, ExtendedParser
+from spydertop.constants import API_LOG_TYPES
+from spydertop.constants.columns import (
     PROCESS_COLUMNS,
     SESSION_COLUMNS,
     CONNECTION_COLUMNS,

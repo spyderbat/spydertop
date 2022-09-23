@@ -15,7 +15,7 @@ import json
 import gzip
 from math import nan
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Dict, NewType, Optional, Set, List, Any, Tuple, Union
+from typing import Callable, Dict, Optional, Set, List, Any, Tuple, Union
 import uuid
 
 import spyderbat_api
@@ -28,18 +28,10 @@ import urllib3
 from urllib3.exceptions import MaxRetryError
 
 from spydertop.config import Config
-from spydertop.cursorlist import CursorList
-from spydertop.utils import API_LOG_TYPES, TimeSpanTracker, get_timezone, log
-
-# custom types for data held in the model
-Tree = NewType("Tree", Dict[str, Tuple[bool, Optional["Tree"]]])
-RecordInternal = NewType(
-    "RecordInternal",
-    Dict[
-        str, Union[str, int, float, Dict[str, "RecordInternal"], List["RecordInternal"]]
-    ],
-)
-Record = NewType("Record", Dict[str, RecordInternal])
+from spydertop.utils import get_timezone, log
+from spydertop.utils.types import Record, Tree, TimeSpanTracker
+from spydertop.utils.cursorlist import CursorList
+from spydertop.constants import API_LOG_TYPES
 
 
 class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-methods

@@ -34,7 +34,7 @@ from asciimatics.widgets import (
 )
 from asciimatics.event import KeyboardEvent, MouseEvent
 
-from spydertop.columns import (
+from spydertop.constants.columns import (
     PROCESS_COLUMNS,
     FLAG_COLUMNS,
     SESSION_COLUMNS,

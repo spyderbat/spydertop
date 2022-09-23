@@ -16,7 +16,8 @@ from asciimatics.exceptions import NextScene
 from asciimatics.event import KeyboardEvent
 from spydertop.model import AppModel
 
-from spydertop.utils import COLOR_REGEX, ExtendedParser
+from spydertop.constants import COLOR_REGEX
+from spydertop.utils.types import ExtendedParser
 from spydertop.widgets import FuncLabel
 
 LOGO = """\

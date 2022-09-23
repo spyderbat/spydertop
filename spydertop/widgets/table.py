@@ -19,7 +19,8 @@ from asciimatics.widgets import Widget
 from asciimatics.parsers import Parser
 from asciimatics.strings import ColouredText
 
-from spydertop.utils import COLOR_REGEX, ExtendedParser
+from spydertop.utils.types import ExtendedParser
+from spydertop.constants import COLOR_REGEX
 from spydertop.model import AppModel, Tree
 from spydertop.config import Config
 

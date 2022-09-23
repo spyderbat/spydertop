@@ -40,13 +40,12 @@ from spydertop.config import Config
 from spydertop.model import AppModel
 from spydertop.widgets import FuncLabel, Padding
 from spydertop.utils import (
-    API_LOG_TYPES,
-    COLOR_REGEX,
-    ExtendedParser,
     get_timezone,
     pretty_datetime,
     log,
 )
+from spydertop.constants import API_LOG_TYPES, COLOR_REGEX
+from spydertop.utils.types import ExtendedParser
 
 
 class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes

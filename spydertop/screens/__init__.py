@@ -25,7 +25,8 @@ from spydertop.screens.failure import FailureFrame
 from spydertop.screens.config import ConfigurationFrame
 from spydertop.screens.feedback import FeedbackFrame
 from spydertop.screens.quit import QuitFrame
-from spydertop.utils import API_LOG_TYPES, log
+from spydertop.utils import log
+from spydertop.constants import API_LOG_TYPES
 
 
 def start_screen(config: Config) -> None:

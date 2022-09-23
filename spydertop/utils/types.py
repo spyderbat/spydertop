@@ -1,230 +1,36 @@
 #
-# utils.py
+# types.py
 #
 # Author: Griffith Thomas
 # Copyright 2022 Spyderbat, Inc. All rights reserved.
 #
 
 """
-Various utilities for spydertop
+Custom or modified types for use in the application.
 """
 
 import bisect
 import re
-import traceback
-from datetime import datetime, timezone
+from datetime import datetime
 from textwrap import TextWrapper
-from typing import Any, Callable, List, Optional, Tuple
+import traceback
+from typing import Dict, List, NewType, Optional, Tuple, Union, Any
 import logging
 
 import click
-from asciimatics.screen import Screen
-from asciimatics.widgets.utilities import THEMES
 from asciimatics.parsers import Parser
 
-# matches all of the escape sequences that are used in the Asciimatics parser
-COLOR_REGEX = r"\${(-?\d+)(, ?(\d+)(, ?(-?\d+))?)?}"
-# the page size to use when converting to bytes
-PAGE_SIZE = 4096
+from spydertop.constants import COLOR_REGEX
 
-
-def pretty_time(time: float) -> str:
-    """Format a time in a human readable format, similar to the format used in htop"""
-    seconds = int(time) % 60
-    minutes = int(time / 60) % 60
-    hours = int(time / 3600)
-    centiseconds = int(time * 100) % 100
-    if hours == 0:
-        if time < 0.1:
-            milliseconds = int(time * 1_000)
-            if milliseconds == 0:
-                microseconds = int(time * 1_000_000)
-                return f"{microseconds}μs"
-            return f"{milliseconds}ms"
-        return f"{minutes}:{seconds:02d}.{centiseconds:02d}"
-    return f"${{6}}{hours}h${{7}}{minutes:02d}:{seconds:02d}"
-
-
-def pretty_datetime(  # pylint: disable=too-many-return-statements
-    d_time: datetime,
-) -> str:
-    """Format a datetime in a short format, and color based on the distance from now"""
-    now = datetime.now(tz=d_time.tzinfo)
-    delta = now - d_time
-    if delta.days == 0:
-        if delta.seconds < 60:
-            return f"${{2}}{delta.seconds} seconds ago"
-        if delta.seconds < 3600:
-            return f"${{2}}{delta.seconds // 60} minutes ago"
-        return f"${{3}}{delta.seconds // 3600} hours ago"
-    if delta.days == 1:
-        return "${3}Yesterday"
-    if delta.days < 7:
-        return f"${{3}}{delta.days} days ago"
-    if delta.days < 365:
-        return f"${{1}}{delta.days // 7} weeks ago"
-    return f"${{1}}{delta.days // 365} years ago"
-
-
-def pretty_address(ip_addr: int, port: int) -> str:
-    """Format an IP address and port number in a fancy, colored format"""
-    return f"{ip_addr:>15}${{8}}:${{7,1}}{port:<5}"
-
-
-def convert_to_seconds(value: str) -> float:
-    """Convert a time string to seconds, with an optional suffix unit"""
-    try:
-        timestamp = float(value)
-    except ValueError:
-        # assume that this is a custom time value
-        time_type = value[-1]
-        timestamp = float(value[:-1])
-        # convert to seconds
-        switch = {"s": 1, "m": 60, "h": 3600, "d": 3600 * 24, "y": 3600 * 24 * 365}
-        timestamp *= switch[time_type]
-    return timestamp
-
-
-def pretty_bytes(n_bytes: int) -> str:
-    """Format a number of bytes in a human readable format, with coloring"""
-    for (suffix, color) in [("", None), ("K", None), ("M", 6), ("G", 2), ("T", 1)]:
-        if n_bytes < 1000:
-            if suffix in {"K", ""}:
-                return f"{int(n_bytes)}{suffix}"
-            precision = 2 if n_bytes < 10 else 1 if n_bytes < 100 else 0
-            return f"${{{color}}}{n_bytes:.{precision}f}{suffix}"
-        n_bytes /= 1024
-    return f"${{1,1}}{n_bytes}P"
-
-
-def header_bytes(n_bytes: int) -> str:
-    """Format a number of bytes in a human readable format, without coloring for the header"""
-    for suffix in ["", "K", "M", "G", "T"]:
-        if n_bytes < 100:
-            n_bytes = round(n_bytes, 2)
-            return f"{n_bytes}{suffix}"
-        n_bytes /= 1024
-    return f"{n_bytes}P"
-
-
-def add_palette(text, model, **kwargs) -> Callable[[], str]:
-    """formats the text with a few keys from the palette"""
-    palette = THEMES[model.config["theme"]]
-    # this is necessary because the palette may be a defaultdict
-    concrete_palette = {
-        "background": palette["background"][0],
-        "borders": palette["borders"][0],
-        "button": palette["button"][0],
-        "button_bg": palette["button"][2],
-        "label": palette["label"][0],
-        "meter_label": (palette.get("meter_label", palette["label"]))[0],
-    }
-    return text.format(**concrete_palette, **kwargs)
-
-
-def get_timezone(model):
-    """Get the timezone based on the config"""
-    return (
-        timezone.utc if model.config["utc_time"] else datetime.now().astimezone().tzinfo
-    )
-
-
-def is_event_in_widget(event, widget):
-    """Determine if the event is in the area of the widget"""
-    return (
-        widget.rebase_event(event).x < 0
-        or widget.rebase_event(event).x > widget.canvas.width
-        or widget.rebase_event(event).y < 0
-        or widget.rebase_event(event).y > widget.canvas.height
-    )
-
-
-# a palette of colors imitating the default look of htop
-HTOP_PALETTE = {
-    "background": (Screen.COLOUR_DEFAULT, Screen.A_NORMAL, Screen.COLOUR_DEFAULT),
-    "borders": (Screen.COLOUR_DEFAULT, Screen.A_NORMAL, Screen.COLOUR_DEFAULT),
-    "button": (Screen.COLOUR_BLACK, Screen.A_NORMAL, Screen.COLOUR_WHITE),
-    "control": (Screen.COLOUR_CYAN, Screen.A_NORMAL, Screen.COLOUR_DEFAULT),
-    "disabled": (Screen.COLOUR_DEFAULT, Screen.A_NORMAL, Screen.COLOUR_MAGENTA),
-    "edit_text": (Screen.COLOUR_DEFAULT, Screen.A_NORMAL, Screen.COLOUR_BLACK),
-    "field": (Screen.COLOUR_DEFAULT, Screen.A_NORMAL, Screen.COLOUR_DEFAULT),
-    "focus_button": (Screen.COLOUR_BLACK, Screen.A_NORMAL, Screen.COLOUR_CYAN),
-    "focus_control": (Screen.COLOUR_CYAN, Screen.A_NORMAL, Screen.COLOUR_DEFAULT),
-    "focus_edit_text": (Screen.COLOUR_CYAN, Screen.A_NORMAL, Screen.COLOUR_BLACK),
-    "focus_field": (Screen.COLOUR_DEFAULT, Screen.A_NORMAL, Screen.COLOUR_DEFAULT),
-    "focus_readonly": (Screen.COLOUR_DEFAULT, Screen.A_NORMAL, Screen.COLOUR_DEFAULT),
-    "invalid": (Screen.COLOUR_RED, Screen.A_NORMAL, Screen.COLOUR_BLACK),
-    "label": (Screen.COLOUR_DEFAULT, Screen.A_NORMAL, Screen.COLOUR_DEFAULT),
-    "readonly": (Screen.COLOUR_DEFAULT, Screen.A_NORMAL, Screen.COLOUR_DEFAULT),
-    "scroll": (Screen.COLOUR_DEFAULT, Screen.A_NORMAL, Screen.COLOUR_DEFAULT),
-    "selected_control": (Screen.COLOUR_DEFAULT, Screen.A_BOLD, Screen.COLOUR_GREEN),
-    "selected_field": (Screen.COLOUR_BLACK, Screen.A_NORMAL, Screen.COLOUR_WHITE),
-    "selected_focus_control": (
-        Screen.COLOUR_BLACK,
-        Screen.A_NORMAL,
-        Screen.COLOUR_CYAN,
-    ),
-    "selected_focus_field": (Screen.COLOUR_BLACK, Screen.A_NORMAL, Screen.COLOUR_CYAN),
-    "shadow": (Screen.COLOUR_BLACK, None, Screen.COLOUR_BLACK),
-    "title": (Screen.COLOUR_BLACK, Screen.A_NORMAL, Screen.COLOUR_GREEN),
-    "meter_label": (Screen.COLOUR_CYAN, Screen.A_NORMAL, Screen.COLOUR_DEFAULT),
-    "meter_bracket": (Screen.COLOUR_WHITE, Screen.A_BOLD, Screen.COLOUR_DEFAULT),
-    "meter_value": (8, Screen.A_BOLD, Screen.COLOUR_DEFAULT),
-    "tab": (Screen.COLOUR_BLACK, Screen.A_NORMAL, Screen.COLOUR_BLUE),
-    "selected_tab": (Screen.COLOUR_BLACK, Screen.A_NORMAL, Screen.COLOUR_GREEN),
-}
-
-THEMES["htop"] = HTOP_PALETTE
-
-default_colors = (231, Screen.A_NORMAL, 234)
-
-# a palette of colors following the Spyderbat color scheme
-SPYDERBAT_PALETTE = {
-    "background": default_colors,
-    "borders": default_colors,
-    "button": (231, Screen.A_NORMAL, 67),
-    "control": (75, Screen.A_NORMAL, 234),
-    "disabled": (231, Screen.A_NORMAL, Screen.COLOUR_MAGENTA),
-    "edit_text": (231, Screen.A_NORMAL, 237),
-    "field": (231, Screen.A_NORMAL, 234),
-    "focus_button": (231, Screen.A_NORMAL, 75),
-    "focus_control": (75, Screen.A_NORMAL, 234),
-    "focus_edit_text": (75, Screen.A_NORMAL, 237),
-    "focus_field": default_colors,
-    "focus_readonly": default_colors,
-    "invalid": (203, Screen.A_NORMAL, 237),
-    "label": default_colors,
-    "readonly": default_colors,
-    "scroll": default_colors,
-    "selected_control": (231, Screen.A_BOLD, 119),
-    "selected_field": (231, Screen.A_NORMAL, 67),
-    "selected_focus_control": (
-        231,
-        Screen.A_NORMAL,
-        75,
-    ),
-    "selected_focus_field": (231, Screen.A_NORMAL, 75),
-    "shadow": (234, None, 234),
-    "title": (231, Screen.A_NORMAL, 243),
-    "meter_label": (75, Screen.A_NORMAL, 234),
-    "meter_bracket": default_colors,
-    "meter_value": (243, Screen.A_BOLD, 234),
-    "tab": (231, Screen.A_NORMAL, 237),
-    "selected_tab": (231, Screen.A_NORMAL, 243),
-}
-
-THEMES["spyderbat"] = SPYDERBAT_PALETTE
-
-API_LOG_TYPES = {
-    "startup": "SpydertopStartup",
-    "shutdown": "SpydertopShutdown",
-    "loaded_data": "SpydertopLoadedData",
-    "orgs": "SpydertopOrgsListed",
-    "sources": "SpydertopSourcesListed",
-    "feedback": "SendFeedback",
-    "navigation": "SpydertopNavigation",
-    "account_created": "SpydertopAccountCreated",
-}
+# custom types for data held in the model
+Tree = NewType("Tree", Dict[str, Tuple[bool, Optional["Tree"]]])
+RecordInternal = NewType(
+    "RecordInternal",
+    Dict[
+        str, Union[str, int, float, Dict[str, "RecordInternal"], List["RecordInternal"]]
+    ],
+)
+Record = NewType("Record", Dict[str, RecordInternal])
 
 
 class DelayedLog:
@@ -322,11 +128,6 @@ class DelayedLog:
     def lines(self) -> List[str]:
         """All logs within the log level as a list"""
         return [line for level, line in self._logs if level >= self.log_level]
-
-
-global log  # pylint: disable=global-at-module-level,invalid-name
-# the global log object, used everywhere
-log = DelayedLog()
 
 
 class CustomTextWrapper(TextWrapper):

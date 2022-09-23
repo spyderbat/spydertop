@@ -14,7 +14,9 @@ from typing import Callable, Optional
 from asciimatics.widgets import Frame, Text, Layout, Widget
 from asciimatics.screen import Screen
 from asciimatics.event import KeyboardEvent, MouseEvent
-from spydertop.utils import COLOR_REGEX, ExtendedParser, is_event_in_widget
+from spydertop.constants import COLOR_REGEX
+from spydertop.utils import is_event_in_widget
+from spydertop.utils.types import ExtendedParser
 
 from spydertop.widgets import FuncLabel
 
