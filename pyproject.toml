@@ -1,3 +1,31 @@
+[project]
+license = { file = "LICENSE" }
+name = "spydertop"
+description = "A tool that provides htop-like functionality for any point in time."
+readme = "README.md"
+requires-python = ">=3.6"
+urls = { github = "https://github.com/spyderbat/spydertop", docker = "https://hub.docker.com/r/spyderbat/spydertop" }
+authors = [{ name = "Griffith Thomas" }]
+maintainers = [{ name = "Spyderbat", email = "dev@spyderbat.com" }]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+]
+keywords = ["spydertop", "spyderbat", "htop", "top"]
+dependencies = [
+    "asciimatics",
+    "click",
+    "spyderbat-api @ https://github.com/spyderbat/api_examples/archive/refs/heads/main.zip#egg=spyderbat-api-1.0.0&subdirectory=python",
+    "pyyaml",
+    "pyperclip",
+    "importlib-metadata >= 1.0; python_version < \"3.8\"",
+]
+dynamic = ["version"]
+[project.scripts]
+spydertop = "spydertop:cli"
+
 [build-system]
 requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
