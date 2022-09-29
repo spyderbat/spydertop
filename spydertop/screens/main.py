@@ -401,6 +401,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
                 return None
             if event.key_code in range(Screen.KEY_F11, Screen.KEY_F1 + 1):
                 self._footer.click(-event.key_code - 2)
+                return None
             if event.key_code in {Screen.KEY_TAB, Screen.KEY_BACK_TAB}:
                 current_tab_index = 0
                 for i, tab in enumerate(self._tabs):
@@ -471,15 +472,9 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             if "valid_from" in record:
                 if record["valid_from"] > self._model.timestamp:
                     continue
-                end_time = (
-                    record["valid_from"] + record["duration"]
-                    if "duration" in record
-                    else record["valid_to"]
-                    if "valid_to" in record
-                    else None
-                )
+                end_time = record.get("valid_to", None)
                 if (
-                    end_time
+                    end_time is not None
                     and end_time < self._model.timestamp - self._model.time_elapsed
                 ):
                     continue
@@ -524,13 +519,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             # determine if the record is visible in this time period
             if process["valid_from"] > self._model.timestamp:
                 continue
-            end_time = process.get(
-                "valid_to",
-                process["valid_from"] + process["duration"]
-                if "duration" in process
-                else None,
-            )
-            if end_time and end_time < self._model.timestamp - self._model.time_elapsed:
+            end_time = process.get("valid_to", None)
+            if end_time is not None and end_time < self._model.timestamp - self._model.time_elapsed:
                 continue
 
             # ignore if the process is hidden

@@ -137,7 +137,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
 
             self.api_client = spyderbat_api.ApiClient(configuration)
 
-    def load_data(
+    def load_data(  # pylint: disable=too-many-statements
         self,
         timestamp: float,
         duration: timedelta = None,
@@ -185,6 +185,11 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
                     **input_data,
                     _preload_content=False,
                 )
+                newline = b"\n"
+                log.debug(
+                    f"Context-uid in response: {api_response.headers.get('x-context-uid', None)}, \
+status: {api_response.status}, size: {len(api_response.data.split(newline))}"
+                )
                 lines += api_response.data.split(b"\n")
 
                 self.progress = 0.5
@@ -196,6 +201,10 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
                     dt="htop",
                     **input_data,
                     _preload_content=False,
+                )
+                log.debug(
+                    f"Context-uid in response: {api_response.headers.get('x-context-uid', None)}, \
+status: {api_response.status}, size: {len(api_response.data.split(newline))}"
                 )
                 lines += api_response.data.split(b"\n")
                 self.log_api(
@@ -218,7 +227,8 @@ Debug info:
     Input data: {input_data}
     Status code: {exc.status}
     Reason: {exc.reason}
-    Body: {exc.body}\
+    Body: {exc.body}
+    Context-UID: {exc.headers.get("x-context-uid", None)}\
                             """
                 )
                 return
@@ -496,6 +506,8 @@ not enough information could be loaded.\
             "session_id": self._session_id,
             **data,
         }
+
+        log.debug(f"Sending API log: {new_data}")
 
         try:
             headers = {

@@ -310,6 +310,11 @@ logging into your account on the website.\
 
                 def load_sources():
                     sources = self.model.get_sources()
+                    if sources is None:
+                        # the failure reason will be set by the model
+                        self.trigger_build()
+                        self._screen.force_update()
+                        return
                     if self.cache["looking_for_sources"] and sources is not None:
                         if len(sources) == 0:
                             sleep(1)
