@@ -21,9 +21,9 @@ RUN pip wheel . -w dist --no-deps
 FROM python:3-alpine
 
 WORKDIR /spydertop
-COPY --from=build /asciimatics/dist/asciimatics-*.whl .
+COPY --from=build /asciimatics/dist/asciimatics-*.whl ./
 RUN pip --no-cache-dir install asciimatics-*.whl
-COPY --from=build /spydertop/dist/spydertop-*.whl .
+COPY --from=build /spydertop/dist/spydertop-*.whl ./
 RUN pip --no-cache-dir install spydertop-*.whl
 
 COPY ./examples /spydertop/examples
