@@ -10,6 +10,7 @@ Custom or modified types for use in the application.
 """
 
 import bisect
+from enum import Enum
 import re
 from datetime import datetime
 from textwrap import TextWrapper
@@ -31,6 +32,95 @@ RecordInternal = NewType(
     ],
 )
 Record = NewType("Record", Dict[str, RecordInternal])
+
+
+# custom types for adding context to values and formatting
+class Bytes:
+    """A class for formatting bytes in a human readable format"""
+
+    value: int
+
+    def __init__(self, value: Union[int, str]):
+        if isinstance(value, str):
+            self.value = int(Bytes.parse_bytes(value))
+        else:
+            self.value = int(value)
+
+    def __str__(self) -> str:
+        n_bytes = self.value
+        for (suffix, color) in [("", None), ("K", None), ("M", 6), ("G", 2), ("T", 1)]:
+            if n_bytes < 1000:
+                if suffix in {"K", ""}:
+                    return f"{int(n_bytes)}{suffix}"
+                precision = 2 if n_bytes < 10 else 1 if n_bytes < 100 else 0
+                return f"${{{color}}}{n_bytes:.{precision}f}{suffix}"
+            n_bytes /= 1024
+        return f"${{1,1}}{n_bytes}P"
+
+    @staticmethod
+    def parse_bytes(value: str) -> int:
+        """Parse a string into bytes"""
+        if value.endswith("B"):
+            value = value[:-1]
+        if value.endswith("K"):
+            return int(float(value[:-1]) * 1024)
+        if value.endswith("M"):
+            return int(float(value[:-1]) * 1024 * 1024)
+        if value.endswith("G"):
+            return int(float(value[:-1]) * 1024 * 1024 * 1024)
+        if value.endswith("T"):
+            return int(float(value[:-1]) * 1024 * 1024 * 1024 * 1024)
+        return int(value)
+
+
+class Alignment(Enum):
+    """The alignment of a column"""
+
+    LEFT = "<"
+    RIGHT = ">"
+    CENTER = "^"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class Status(Enum):
+    """The status of a process"""
+
+    RUNNING = "R"
+    SLEEPING = "S"
+    WAITING = "D"
+    ZOMBIE = "Z"
+    STOPPED = "T"
+    TRACING_STOP = "t"
+    PAGING = "W"
+    DEAD = "X"
+    WAKE_KILL = "K"
+    WAKING = "W"
+    PARKED = "P"
+    UNKNOWN = "?"
+
+
+class Severity(Enum):
+    """Severity levels for flags."""
+
+    INFO = -1
+    LOW = 0
+    MEDIUM = 1
+    HIGH = 2
+    CRITICAL = 3
+
+    def __lt__(self, other: "Severity") -> bool:
+        return self.value < other.value
+
+    def __gt__(self, other: "Severity") -> bool:
+        return self.value > other.value
+
+    def __le__(self, other: "Severity") -> bool:
+        return self.value <= other.value
+
+    def __ge__(self, other: "Severity") -> bool:
+        return self.value >= other.value
 
 
 class DelayedLog:

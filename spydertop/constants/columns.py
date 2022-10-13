@@ -9,58 +9,138 @@
 A series of functions to handle the processing and formatting of top data for
 the cells inside of the records table.
 
-The format for each of the columns is a tuple of:
-    - The name of the column
-    - The function to call to get the text for the column
-    - The alignment of the column
-    - The width of the column
-    - The function to call to get the value for the column
-    - Whether the column is enabled (by default)
+The Column class is used to define the columns that are displayed in the table.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
+from typing import Any, Optional, Type, Callable, TYPE_CHECKING
 
 from spydertop.utils import (
     get_timezone,
     pretty_address,
-    pretty_bytes,
     pretty_time,
+    log,
 )
+from spydertop.utils.types import Alignment, Record, Bytes, Severity, Status
 from spydertop.constants import PAGE_SIZE
+
+# Note: this is a workaround to avoid circular imports
+# TYPE_CHECKING is False at runtime
+if TYPE_CHECKING:
+    from spydertop.model import AppModel
+else:
+    AppModel = Any
+
+
+class Column:
+    """
+    Holds the information for processing and displaying a column.
+    Values here work similarly to the values used in MUI DataGrid columns.
+    """
+
+    header_name: str
+    max_width: int
+    value_type: Type = Any
+    enabled: bool
+    align: Alignment
+    value_getter: Callable[[AppModel, Record], value_type]
+    value_formatter: Callable[[AppModel, Record, value_type], str]
+
+    def __init__(  # pylint: disable=too-many-arguments
+        self,
+        name: str,
+        max_width: int,
+        value_type: Type,
+        align: Alignment = None,
+        enabled=True,
+        field: str = None,
+        value_getter: Callable[[AppModel, Record], value_type] = None,
+        value_formatter: Callable[[AppModel, Record, value_type], str] = None,
+    ) -> None:
+        self.header_name = name
+        self.max_width = max_width
+        self.value_type = value_type
+        self.align = align or (
+            Alignment.RIGHT
+            if value_type is int or value_type is float
+            else Alignment.LEFT
+        )
+        self.enabled = enabled
+        field = field or name.lower()
+        if value_type is datetime:
+            self.value_getter = value_getter or (
+                lambda m, r: datetime.fromtimestamp(r[field], timezone.utc).astimezone(
+                    get_timezone(m)
+                )
+                if field in r
+                else None
+            )
+        else:
+            self.value_getter = value_getter or (lambda m, r: value_type(r[field]))
+        self.value_formatter = value_formatter or (lambda m, r, v: str(v))
+
+    def __getitem__(self, key: int) -> Any:
+        attr_map = [
+            "header_name",
+            "value_formatter",
+            "align",
+            "max_width",
+            "value_getter",
+            "enabled",
+        ]
+        return getattr(self, attr_map[key])
+
+    def get_value(self, model: AppModel, record: Record) -> Any:
+        """Returns the value for the column"""
+        if record is None:
+            return None
+        try:
+            return self.value_getter(model, record)
+        except (KeyError, TypeError, IndexError) as err:
+            log.debug(f"Getting value for {self.header_name} failed.")
+            log.traceback(err)
+            return None
+
+    def format_value(self, model: AppModel, record: Record, value: Any) -> str:
+        """Returns the formatted value for the column"""
+        if record is None or value is None:
+            return ""
+        try:
+            return self.value_formatter(model, record, value)
+        except (KeyError, TypeError, IndexError) as err:
+            log.debug(f"Getting value for {self.header_name} failed.")
+            log.traceback(err)
+            return ""
 
 
 ########################### Processes ###########################
 
-# functions for the processes table take four parameters:
-#   - m: the model
-#   - pr: the previous resource usage record
-#   - r: the current resource usage record
-#   - p: the current model process record
-# both the pr and r parameters may be None if
-# the process is a thread, or if no information is found
 
-
-# pylint: disable=invalid-name
-def get_cpu_per(m, pr, r, _p):
-    """Formats the percentage of CPU time used by the process"""
-    if r is None:
+def get_cpu_per(model: AppModel, process: Record):
+    """Calculates the percentage of CPU time used by the process"""
+    record = get_resource_record(model, process)
+    prev_record = get_resource_record(model, process, previous=True)
+    if record is None or prev_record is None:
         return None
-    time_delta = m.time_elapsed
-    clk_tck = m.get_value("clk_tck")
-    cpu = r["utime"] - pr["utime"] + r["stime"] - pr["stime"]
+    time_delta = model.time_elapsed
+    clk_tck = model.get_value("clk_tck")
+    cpu = (
+        record["utime"] - prev_record["utime"] + record["stime"] - prev_record["stime"]
+    )
     cpu /= time_delta
     cpu /= clk_tck
     cpu = round(cpu * 100, 1)
     return cpu
 
 
-def get_mem_per(m, _pr, r, _p):
+def get_mem_per(model: AppModel, process: Record):
     """Formats the percentage of memory used by the process"""
-    if r is None:
+    record = get_resource_record(model, process)
+    if record is None:
         return None
-    mem = r["rss"] * PAGE_SIZE
-    mem_model = m.memory
+    mem = record["rss"] * PAGE_SIZE
+    mem_model = model.memory
     if mem_model:
         mem /= mem_model["MemTotal"]
     else:
@@ -69,429 +149,333 @@ def get_mem_per(m, _pr, r, _p):
     return mem
 
 
-def get_time_plus(m, _pr, r, _p):
-    """Formats the time spent in the process"""
-    if r is None:
-        return None
-    clk_tck = m.get_value("clk_tck")
-    cpu = r["utime"] + r["stime"]
-    time = cpu / clk_tck
-    return pretty_time(time)
-
-
-def get_time_plus_value(m, _pr, r, _p):
+def get_time_plus_value(model: AppModel, process: Record):
     """Returns the time spent in the process"""
-    if r is None:
+    record = get_resource_record(model, process)
+    if record is None:
         return None
-    clk_tck = m.get_value("clk_tck")
-    cpu = r["utime"] + r["stime"]
+    clk_tck = model.get_value("clk_tck")
+    cpu = record["utime"] + record["stime"]
     time = cpu / clk_tck
-    return time
+    return timedelta(seconds=time)
 
 
-def color_cmd(_m, _pr, _r, p):
+def color_cmd(_m, process: Record, args: list[str]):
     """Formats the command for the process"""
-    base = f'{" ".join(p["args"])}'
+    base = f'{" ".join(args)}'
     color = ""
-    if p["thread"] is True:
+    if process["thread"] is True:
         color = "${2}"
-    if p["type"] == "kernel thread":
+    if process["type"] == "kernel thread":
         color = "${8,1}"
     return color + base
 
 
-def format_environ(_m, _pr, _r, p):
+def format_environ(_m, _p, environ: dict[str, str]):
     """Format the environment of a process"""
-    environ_lines = json.dumps(
-        p.get("environ", None) or {}, indent=4, sort_keys=True
-    ).split("\n")
+    environ_lines = json.dumps(environ, indent=4, sort_keys=True).split("\n")
     if len(environ_lines) > 10:
         environ_lines = environ_lines[:9] + ["    ... <remaining values hidden>"]
     return "\n".join(environ_lines)
 
 
+def get_resource_record(
+    model: AppModel, process_record: Record, previous=False
+) -> Optional[Record]:
+    """Returns the resource record for the process"""
+    process_table = model.get_value("processes", previous)
+    if process_table is None:
+        return None
+    default_values = process_table["default"]
+    if str(process_record["pid"]) not in process_table:
+        return None
+    record = default_values.copy()
+    record.update(process_table[str(process_record["pid"])])
+    return record
+
+
 PROCESS_COLUMNS = [
-    ("ID", lambda m, pr, r, p: p["id"], "<", 30, lambda m, pr, r, p: p["id"], False),
-    (
-        "NAME",
-        lambda m, pr, r, p: p["name"],
-        "<",
-        15,
-        lambda m, pr, r, p: p["name"],
-        False,
-    ),
-    (
-        "PPID",
-        lambda m, pr, r, p: int(p["ppid"]),
-        ">",
-        7,
-        lambda m, pr, r, p: int(p["ppid"]),
-        False,
-    ),
-    (
-        "PID",
-        lambda m, pr, r, p: int(p["pid"]),
-        ">",
-        7,
-        lambda m, pr, r, p: int(p["pid"]),
-        True,
-    ),
-    (
+    Column("ID", 30, str, enabled=False),
+    Column("NAME", 15, str, enabled=False),
+    Column("PPID", 7, int, enabled=False),
+    Column("PID", 7, int),
+    Column(
         "USER",
-        lambda m, pr, r, p: p["euser"] if p["euser"] != "root" else "${8,1}root",
-        "<",
         9,
-        lambda m, pr, r, p: p["euser"],
-        True,
+        str,
+        field="euser",
+        value_formatter=lambda m, r, x: x if x != "root" else "${8,1}root",
     ),
-    (
+    Column(
         "AUSER",
-        lambda m, pr, r, p: p["auser"] if p["auser"] != "SYSTEM" else "${8,1}SYSTEM",
-        "<",
         9,
-        lambda m, pr, r, p: p["auser"],
-        False,
+        str,
+        field="auser",
+        value_formatter=lambda m, r, x: x if x != "SYSTEM" else "${8,1}SYSTEM",
+        enabled=False,
     ),
-    (
+    Column(
         "START_TIME",
-        lambda m, pr, r, p: datetime.fromtimestamp(
-            int(p["valid_from"]), timezone.utc
-        ).astimezone(get_timezone(m)),
-        ">",
         27,
-        lambda m, pr, r, p: p["valid_from"],
-        False,
+        datetime,
+        align=Alignment.RIGHT,
+        field="valid_from",
+        enabled=False,
     ),
-    (
+    Column(
         "PRI",
-        lambda m, pr, r, p: int(r["priority"]) if r else "${8,1}?",
-        ">",
         3,
-        lambda m, pr, r, p: int(r["priority"]) if r else None,
-        True,
+        int,
+        value_getter=lambda m, x: int(get_resource_record(m, x)["priority"])
+        if get_resource_record(m, x) is not None
+        else None,
+        value_formatter=lambda m, r, x: str(x) if x is not None else "${8,1}?",
     ),
-    (
+    Column(
         "NI",
-        lambda m, pr, r, p: (
-            int(r["nice"]) if r["nice"] >= 0 else f'${{1}}{int(r["nice"])}'
-        )
-        if r
-        else "${8,1}?",
-        ">",
         3,
-        lambda m, pr, r, p: int(r["nice"]) if r else None,
-        True,
+        int,
+        value_getter=lambda m, x: int(get_resource_record(m, x)["nice"])
+        if get_resource_record(m, x) is not None
+        else None,
+        value_formatter=lambda m, r, x: str(x) if x is not None else "${8,1}?",
     ),
-    (
+    Column(
         "VIRT",
-        lambda m, pr, r, p: pretty_bytes(r["vsize"]) if r else "",
-        ">",
         5,
-        lambda m, pr, r, p: int(r["vsize"]) if r else None,
-        True,
+        Bytes,
+        align=Alignment.RIGHT,
+        value_getter=lambda m, x: Bytes(get_resource_record(m, x)["vsize"])
+        if get_resource_record(m, x) is not None
+        else None,
     ),
-    (
+    Column(
         "RES",
-        lambda m, pr, r, p: pretty_bytes(r["rss"] * PAGE_SIZE) if r else "",
-        ">",
         5,
-        lambda m, pr, r, p: int(r["rss"]) * PAGE_SIZE if r else None,
-        True,
+        Bytes,
+        align=Alignment.RIGHT,
+        value_getter=lambda m, x: Bytes(get_resource_record(m, x)["rss"] * PAGE_SIZE)
+        if get_resource_record(m, x) is not None
+        else None,
     ),
-    (
+    Column(
         "SHR",
-        lambda m, pr, r, p: pretty_bytes(r["shared"]) if r else "",
-        ">",
         5,
-        lambda m, pr, r, p: int(r["shared"]) if r else None,
-        True,
+        Bytes,
+        align=Alignment.RIGHT,
+        value_getter=lambda m, x: Bytes(get_resource_record(m, x)["shared"])
+        if get_resource_record(m, x) is not None
+        else None,
     ),
-    (
+    Column(
         "S",
-        lambda m, pr, r, p: ("${8,1}" + r["state"] if r["state"] != "R" else "${2}R")
-        if r
-        else "${8,1}?",
-        "^",
         1,
-        lambda m, pr, r, p: r["state"] if r else None,
-        True,
+        Status,
+        value_getter=lambda m, x: get_resource_record(m, x)["state"]
+        if get_resource_record(m, x)
+        else "?",
+        value_formatter=lambda m, r, x: "${8,1}" + x
+        if x != Status.RUNNING
+        else "${2}R",
     ),
-    (
+    Column(
         "TYPE",
-        lambda m, pr, r, p: (
-            p["type"] if p["type"] != "kernel thread" else "${8,1}kthread"
-        ),
-        "<",
         7,
-        lambda m, pr, r, p: p["type"],
-        False,
+        str,
+        value_getter=lambda m, x: x["type"]
+        if x["type"] != "kernel thread"
+        else "kthread",
+        enabled=False,
     ),
-    (
+    Column(
         "I",
-        lambda m, pr, r, p: "${2}Y" if p["interactive"] else "${1}N",
-        ">",
         1,
-        lambda m, pr, r, p: p["interactive"],
-        True,
+        bool,
+        field="interactive",
+        value_formatter=lambda m, r, x: "${2}Y" if x else "${1}N",
     ),
-    ("CPU%", get_cpu_per, ">", 4, get_cpu_per, True),
-    ("MEM%", get_mem_per, ">", 4, get_mem_per, True),
-    ("TIME+", get_time_plus, ">", 9, get_time_plus_value, True),
-    (
+    Column(
+        "CPU%",
+        4,
+        float,
+        value_getter=get_cpu_per,
+        value_formatter=lambda m, r, x: f"{x:4.1f}",
+    ),
+    Column(
+        "MEM%",
+        4,
+        float,
+        value_getter=get_mem_per,
+        value_formatter=lambda m, r, x: f"{x:4.1f}",
+    ),
+    Column(
+        "TIME+",
+        9,
+        timedelta,
+        align=Alignment.RIGHT,
+        value_getter=get_time_plus_value,
+        value_formatter=lambda m, r, x: pretty_time(x.total_seconds()),
+    ),
+    Column(
         "ELAPSED",
-        lambda m, pr, r, p: pretty_time(m.timestamp - p["valid_from"]),
-        ">",
         9,
-        lambda m, pr, r, p: m.timestamp - p["valid_from"],
-        False,
+        timedelta,
+        align=Alignment.RIGHT,
+        value_getter=lambda m, x: timedelta(seconds=m.timestamp - x["valid_from"]),
+        value_formatter=lambda m, r, x: pretty_time(x.total_seconds()),
+        enabled=False,
     ),
-    (
+    Column(
         "ANCESTORS",
-        lambda m, pr, r, p: "/".join(p.get("ancestors", None) or []),
-        "<",
         30,
-        lambda m, pr, r, p: "/".join(p.get("ancestors", None) or []),
-        False,
+        list,
+        value_getter=lambda m, x: x.get("ancestors", None) or [],
+        value_formatter=lambda m, r, x: "/".join(x),
+        enabled=False,
     ),
-    (
-        "CGROUP",
-        lambda m, pr, r, p: p.get("cgroup", None) or "",
-        "<",
-        30,
-        lambda m, pr, r, p: p["cgroup"] if "cgroup" in p else None,
-        False,
-    ),
-    (
-        "CONTAINER",
-        lambda m, pr, r, p: p.get("container", None) or "${8,1}N/A",
-        ">",
-        9,
-        lambda m, pr, r, p: p["container"] if "container" in p else None,
-        False,
-    ),
-    (
+    Column("CGROUP", 30, str, enabled=False),
+    Column("CONTAINER", 10, str, enabled=False),
+    Column(
         "ENVIRONMENT",
-        format_environ,
-        "<",
         11,
-        lambda m, pr, r, p: json.dumps(p.get("environ", None) or {}),
-        False,
+        dict,
+        field="environ",
+        value_formatter=format_environ,
+        enabled=False,
     ),
-    ("Command", color_cmd, "<", 0, lambda m, pr, r, p: f'{" ".join(p["args"])}', True),
+    Column("Command", 0, list, field="args", value_formatter=color_cmd),
 ]
 
 ########################### Sessions ###########################
 
-# functions for the rest of the record types take two parameters:
-#  - m: the model
-#  - s/l/f/etc.: the current session/listening socket/flag/etc. record
-
-
 SESSION_COLUMNS = [
-    ("ID", lambda m, s: s["id"], "<", 30, lambda m, s: s["id"], False),
-    ("EUID", lambda m, s: s["euid"], ">", 6, lambda m, s: int(s["euid"]), True),
-    (
+    Column("ID", 30, str, enabled=False),
+    Column("EUID", 6, int),
+    Column(
         "EUSER",
-        lambda m, s: s["euser"] if s["euser"] != "root" else "${8,1}root",
-        "<",
         9,
-        lambda m, s: s["euser"],
-        True,
+        str,
+        value_formatter=lambda m, s, x: x if x != "root" else "${8,1}root",
     ),
-    ("AUID", lambda m, s: s["auid"], ">", 6, lambda m, s: int(s["auid"]), False),
-    (
+    Column("AUID", 6, int, enabled=False),
+    Column(
         "AUSER",
-        lambda m, s: s["auser"] if s["auser"] != "root" else "${8,1}root",
-        "<",
         9,
-        lambda m, s: s["auser"],
-        False,
+        str,
+        value_formatter=lambda m, s, x: x if x != "root" else "${8,1}root",
+        enabled=False,
     ),
-    (
+    Column(
         "PARENT",
-        lambda m, s: m.sessions[s["psuid"]]["euser"]
-        if s["psuid"] is not None and s["psuid"] in m.sessions
+        9,
+        str,
+        field="psuid",
+        value_formatter=lambda m, s, x: m.sessions[x]["euser"]
+        if x in m.sessions
         else "",
-        "<",
-        9,
-        lambda m, s: s["psuid"],
-        False,
+        enabled=False,
     ),
-    (
-        "START_TIME",
-        lambda m, s: datetime.fromtimestamp(
-            int(s["valid_from"]), timezone.utc
-        ).astimezone(get_timezone(m)),
-        ">",
-        27,
-        lambda m, s: s["valid_from"],
-        True,
-    ),
-    (
+    Column("START_TIME", 27, datetime, align=Alignment.RIGHT, field="valid_from"),
+    Column(
         "DURATION",
-        lambda m, s: pretty_time(m.timestamp - s["valid_from"])
-        if s["expire_at"] > m.timestamp
-        else pretty_time(s["expire_at"] - s["valid_from"]),
-        ">",
         9,
-        lambda m, s: m.timestamp - s["valid_from"],
-        True,
+        timedelta,
+        align=Alignment.RIGHT,
+        value_getter=lambda m, s: timedelta(seconds=m.timestamp - s["valid_from"])
+        if s["expire_at"] > m.timestamp
+        else timedelta(seconds=s["expire_at"] - s["valid_from"]),
+        value_formatter=lambda m, s, x: pretty_time(x.total_seconds()),
     ),
-    ("LEADPID", lambda m, s: s["pid"], ">", 7, lambda m, s: s["pid"], True),
-    (
-        "LEADPNAME",
-        lambda m, s: s["proc_name"],
-        "<",
-        15,
-        lambda m, s: s["proc_name"],
-        True,
-    ),
-    (
+    Column("LEADPID", 7, int, field="pid"),
+    Column("LEADPNAME", 15, str, field="proc_name"),
+    Column(
         "I",
-        lambda m, s: "${2}Y" if s["interactive"] else "${1}N",
-        ">",
         1,
-        lambda m, s: s["interactive"],
-        True,
+        bool,
+        field="interactive",
+        value_formatter=lambda m, s, x: "${2}Y" if x else "${1}N",
     ),
-    ("MUID", lambda m, s: s["muid"], "<", 20, lambda m, s: s["muid"], False),
-    ("SESSPATH", lambda m, s: s["spath"], "<", 0, lambda m, s: s["spath"], True),
+    Column("MUID", 20, str, field="muid", enabled=False),
+    Column("SESSPATH", 0, str, field="spath"),
 ]
+
 
 ########################### Connections ###########################
 
 CONNECTION_COLUMNS = [
-    ("ID", lambda m, c: c["id"], "<", 42, lambda m, c: c["id"], False),
-    ("PTCL", lambda m, c: c["proto"], "<", 4, lambda m, c: c["proto"], True),
-    (
-        "START_TIME",
-        lambda m, c: datetime.fromtimestamp(c["valid_from"], timezone.utc).astimezone(
-            get_timezone(m)
-        ),
-        "<",
-        27,
-        lambda m, c: c["valid_from"],
-        False,
-    ),
-    (
-        "END_TIME",
-        lambda m, c: datetime.fromtimestamp(c["valid_to"], timezone.utc).astimezone(
-            get_timezone(m)
-        )
-        if "valid_to" in c
-        else None,
-        "<",
-        27,
-        lambda m, c: c.get("valid_to", None),
-        False,
-    ),
-    (
+    Column("ID", 42, str, enabled=False),
+    Column("PTCL", 4, str, field="proto"),
+    Column("START_TIME", 27, datetime, field="valid_from", enabled=False),
+    Column("END_TIME", 27, datetime, field="valid_to", enabled=False),
+    Column(
         "DURATION",
-        lambda m, c: pretty_time(m.timestamp - c["valid_from"])
-        if "duration" not in c or "valid_to" not in c or c["valid_to"] > m.timestamp
-        else pretty_time(c["duration"]),
-        "<",
         9,
-        lambda m, c: m.timestamp - c["valid_from"]
+        timedelta,
+        value_getter=lambda m, c: timedelta(seconds=m.timestamp - c["valid_from"])
         if "duration" not in c or "valid_to" not in c or c["valid_to"] > m.timestamp
-        else c["duration"],
-        True,
+        else timedelta(seconds=c["duration"]),
+        value_formatter=lambda m, c, x: pretty_time(x.total_seconds()),
     ),
-    (
-        "TXPACK",
-        lambda m, c: c["packets_tx"],
-        ">",
-        6,
-        lambda m, c: c["packets_tx"],
-        False,
-    ),
-    (
-        "RXPACK",
-        lambda m, c: c["packets_rx"],
-        ">",
-        6,
-        lambda m, c: c["packets_rx"],
-        False,
-    ),
-    (
-        "TXBYTES",
-        lambda m, c: pretty_bytes(c["bytes_tx"]),
-        ">",
-        7,
-        lambda m, c: c["bytes_tx"],
-        True,
-    ),
-    (
-        "RXBYTES",
-        lambda m, c: pretty_bytes(c["bytes_rx"]),
-        ">",
-        7,
-        lambda m, c: c["bytes_rx"],
-        True,
-    ),
-    (
-        "PROCESS",
-        lambda m, c: c["proc_name"],
-        "<",
-        15,
-        lambda m, c: c["proc_name"],
-        True,
-    ),
-    (
+    Column("TXPACK", 6, int, field="packets_tx", enabled=False),
+    Column("RXPACK", 6, int, field="packets_rx", enabled=False),
+    Column("TXBYTES", 7, Bytes, align=Alignment.RIGHT, field="bytes_tx"),
+    Column("RXBYTES", 7, Bytes, align=Alignment.RIGHT, field="bytes_rx"),
+    Column("PROCESS", 15, str, field="proc_name"),
+    Column(
         "PEER",
-        lambda m, c: f'{c["peer_proc_name"]} on {c["peer_muid"]}'
-        if "peer_proc_name" in c and "peer_muid" in c
-        else "${8,1}EXTERNAL",
-        "<",
         20,
-        lambda m, c: c.get("peer_proc_name", "EXTERNAL"),
-        False,
+        str,
+        value_getter=lambda m, c: f'{c["peer_proc_name"]} on {c["peer_muid"]}'
+        if "peer_proc_name" in c and "peer_muid" in c
+        else "EXTERNAL",
+        value_formatter=lambda m, c, x: x if x != "EXTERNAL" else "${8,1}EXTERNAL",
+        enabled=False,
     ),
-    (
+    Column(
         "LOCAL",
-        lambda m, c: pretty_address(c["local_ip"], c["local_port"]),
-        ">",
         45,
-        lambda m, c: f'{c["local_ip"]}:{c["local_port"]}',
-        True,
+        str,
+        align=Alignment.RIGHT,
+        value_getter=lambda m, c: f'{c["local_ip"]}:{c["local_port"]}',
+        value_formatter=lambda m, c, x: pretty_address(c["local_ip"], c["local_port"]),
     ),
-    (
+    Column(
         "DIR",
-        lambda m, c: "${3}<--"
-        if c["direction"] == "inbound"
-        else "${4}-->"
-        if c["direction"] == "outbound"
-        else "${8,1}?",
-        "^",
         3,
-        lambda m, c: c["direction"] == "inbound",
-        True,
+        str,
+        field="direction",
+        align=Alignment.CENTER,
+        value_formatter=lambda m, c, x: "${3}<--"
+        if x == "inbound"
+        else "${4}-->"
+        if x == "outbound"
+        else "${8,1}?",
     ),
-    (
+    Column(
         "REMOTE",
-        lambda m, c: pretty_address(c["remote_ip"], c["remote_port"]),
-        "<",
         0,
-        lambda m, c: f'{c["remote_ip"]}:{c["remote_port"]}',
-        True,
+        str,
+        value_getter=lambda m, c: f'{c["remote_ip"]}:{c["remote_port"]}',
+        value_formatter=lambda m, c, x: pretty_address(
+            c["remote_ip"], c["remote_port"]
+        ),
     ),
 ]
 
 ########################### Flags ###########################
 
 
-def color_severity(_m, f) -> str:
+def color_severity(_m, _f, severity: Severity) -> str:
     """Format the severity of a flag."""
-    severity = f["severity"]
-    if severity == "info":
+    if severity == Severity.INFO:
         return "${8}I"
-    if severity == "low":
+    if severity == Severity.LOW:
         return "L"
-    if severity == "medium":
+    if severity == Severity.MEDIUM:
         return "${11}M"
-    if severity == "high":
+    if severity == Severity.HIGH:
         return "${3,1}H"
-    if severity == "critical":
+    if severity == Severity.CRITICAL:
         return "${1,1}C"
     return "${8,1}?"
 
@@ -499,98 +483,76 @@ def color_severity(_m, f) -> str:
 SEVERITIES = {"info": -1, "low": 0, "medium": 1, "high": 2, "critical": 3}
 
 FLAG_COLUMNS = [
-    ("ID", lambda m, f: f["id"], "<", 42, lambda m, f: f["id"], False),
-    (
-        "TIME",
-        lambda m, f: datetime.fromtimestamp(f["time"], timezone.utc).astimezone(
-            get_timezone(m)
-        ),
-        "<",
-        27,
-        lambda m, f: f["time"],
-        True,
-    ),
-    (
+    Column("ID", 42, str, enabled=False),
+    Column("TIME", 27, datetime),
+    Column(
         "AGE",
-        lambda m, f: pretty_time(m.timestamp - f["time"]),
-        ">",
         9,
-        lambda m, f: m.timestamp - f["time"],
-        True,
+        timedelta,
+        align=Alignment.RIGHT,
+        value_getter=lambda m, f: timedelta(seconds=m.timestamp - f["time"]),
+        value_formatter=lambda m, f, x: pretty_time(x.total_seconds()),
     ),
-    (
+    Column(
         "EXCEPTED",
-        lambda m, f: "${2}Y" if f["false_positive"] else "${1}N",
-        "^",
         8,
-        lambda m, f: f["false_positive"],
-        True,
+        bool,
+        align=Alignment.CENTER,
+        field="false_positive",
+        value_formatter=lambda m, f, x: "${2}Y" if x else "${1}N",
     ),
-    ("SEV", color_severity, "^", 3, lambda m, f: SEVERITIES[f["severity"]], True),
-    (
+    Column(
+        "SEV",
+        3,
+        Severity,
+        align=Alignment.CENTER,
+        value_getter=lambda m, f: Severity(SEVERITIES[f["severity"]]),
+        value_formatter=color_severity,
+    ),
+    Column(
         "MITRE",
-        lambda m, f: f["mitre_mapping"][0].get("technique_name", "")
-        if f["mitre_mapping"]
-        else "",
-        "<",
         30,
-        lambda m, f: f["mitre_mapping"][0].get("technique_name", "")
-        if f["mitre_mapping"]
-        else "",
-        False,
+        str,
+        value_getter=lambda m, f: f["mitre_mapping"][0].get("technique_name", None)
+        if len(f["mitre_mapping"]) > 0
+        else None,
+        enabled=False,
     ),
-    (
+    Column(
         "ANCESTORS",
-        lambda m, f: "/".join(f.get("ancestors", None) or []),
-        "<",
         30,
-        lambda m, f: "/".join(f.get("ancestors", None) or []),
-        False,
+        list,
+        value_getter=lambda m, f: f.get("ancestors", None) or [],
+        value_formatter=lambda m, f, x: "/".join(x),
+        enabled=False,
     ),
-    (
-        "Description",
-        lambda m, f: f["description"],
-        "<",
-        0,
-        lambda m, f: f["description"],
-        True,
-    ),
+    Column("Description", 0, str),
 ]
 
 ########################### Listening Sockets ###########################
 
 LISTENING_SOCKET_COLUMNS = [
-    ("ID", lambda m, l: l["id"], "<", 42, lambda m, l: l["id"], False),
-    ("FAMILY", lambda m, l: l["family"], "<", 4, lambda m, l: l["family"], True),
-    ("PTCL", lambda m, l: l["proto"], "<", 4, lambda m, l: l["proto"], True),
-    (
-        "START_TIME",
-        lambda m, l: datetime.fromtimestamp(l["valid_from"], timezone.utc).astimezone(
-            get_timezone(m)
-        ),
-        "<",
-        27,
-        lambda m, l: l["valid_from"],
-        False,
-    ),
-    (
+    Column("ID", 42, str, enabled=False),
+    Column("FAMILY", 4, str),
+    Column("PTCL", 4, str, field="proto"),
+    Column("START_TIME", 27, datetime, field="valid_from", enabled=False),
+    Column(
         "DURATION",
-        lambda m, l: pretty_time(m.timestamp - l["valid_from"])
-        if "duration" not in l or l["valid_to"] > m.timestamp
-        else pretty_time(l["duration"]),
-        "<",
         9,
-        lambda m, l: l.get("duration", m.timestamp - l["valid_from"]),
-        True,
+        timedelta,
+        value_getter=lambda m, l: timedelta(
+            seconds=l.get("duration", m.timestamp - l["valid_from"])
+        ),
+        value_formatter=lambda m, l, x: pretty_time(x.total_seconds()),
     ),
-    (
+    Column(
         "LOCAL",
-        lambda m, l: pretty_address(l["local_ip"], l["local_port"]),
-        ">",
         45,
-        lambda m, l: f'{l["local_ip"]}:{l["local_port"]}',
-        True,
+        str,
+        align=Alignment.RIGHT,
+        value_getter=lambda m, l: f'{l["local_ip"]}:{l["local_port"]}',
+        value_formatter=lambda m, l, x: pretty_address(l["local_ip"], l["local_port"]),
     ),
-    ("PUID", lambda m, l: l["puid"], "<", 20, lambda m, l: l["puid"], False),
-    ("PROCESS", lambda m, l: l["proc_name"], "<", 0, lambda m, l: l["proc_name"], True),
+    Column("PUID", 20, str, enabled=False),
+    Column("PROCESS", 0, str, field="proc_name"),
 ]

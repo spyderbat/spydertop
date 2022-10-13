@@ -11,7 +11,7 @@ Configuration object and associated functions
 
 import logging
 import os
-from typing import Any, Dict, Optional, TextIO, Union
+from typing import Any, Dict, List, Optional, TextIO, Union
 from datetime import datetime, timedelta
 
 import yaml
@@ -23,6 +23,7 @@ from spydertop.constants.columns import (
     LISTENING_SOCKET_COLUMNS,
     PROCESS_COLUMNS,
     SESSION_COLUMNS,
+    Column,
 )
 from spydertop.utils import log
 
@@ -122,20 +123,12 @@ class Config:  # pylint: disable=too-many-instance-attributes
                 if key in self.settings:
                     self.settings[key] = settings_file["settings"][key]
 
-            def load_enabled(name, columns):
+            def load_enabled(name: str, columns: List[Column]):
                 if name in settings_file:
                     for key in settings_file[name]:
-                        names = [row[0] for row in columns]
+                        names = [row.header_name for row in columns]
                         if key in names:
-                            col = columns[names.index(key)]
-                            columns[names.index(key)] = (
-                                col[0],
-                                col[1],
-                                col[2],
-                                col[3],
-                                col[4],
-                                settings_file[name][key],
-                            )
+                            columns[names.index(key)].enabled = settings_file[name][key]
 
             load_enabled("processes", PROCESS_COLUMNS)
             load_enabled("connections", CONNECTION_COLUMNS)

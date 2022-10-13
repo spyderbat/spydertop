@@ -10,6 +10,8 @@ This module contains a set of constant values, including the column specificatio
 and color palettes.
 """
 
+import spydertop.constants.palettes
+
 # matches all of the escape sequences that are used in the Asciimatics parser
 COLOR_REGEX = r"\${(-?\d+)(, ?(\d+)(, ?(-?\d+))?)?}"
 # the page size to use when converting to bytes

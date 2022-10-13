@@ -10,7 +10,7 @@ Various utilities for spydertop
 """
 
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Callable, List
 
 from asciimatics.widgets.utilities import THEMES
 
@@ -78,18 +78,6 @@ def convert_to_seconds(value: str) -> float:
     return timestamp
 
 
-def pretty_bytes(n_bytes: int) -> str:
-    """Format a number of bytes in a human readable format, with coloring"""
-    for (suffix, color) in [("", None), ("K", None), ("M", 6), ("G", 2), ("T", 1)]:
-        if n_bytes < 1000:
-            if suffix in {"K", ""}:
-                return f"{int(n_bytes)}{suffix}"
-            precision = 2 if n_bytes < 10 else 1 if n_bytes < 100 else 0
-            return f"${{{color}}}{n_bytes:.{precision}f}{suffix}"
-        n_bytes /= 1024
-    return f"${{1,1}}{n_bytes}P"
-
-
 def header_bytes(n_bytes: int) -> str:
     """Format a number of bytes in a human readable format, without coloring for the header"""
     for suffix in ["", "K", "M", "G", "T"]:
@@ -130,3 +118,11 @@ def is_event_in_widget(event, widget):
         or widget.rebase_event(event).y < 0
         or widget.rebase_event(event).y > widget.canvas.height
     )
+
+
+def calculate_widths(screen_width, desired_columns: List[int]) -> List[int]:
+    """Manually calculate the widths for a Layout, as the default has rounding errors."""
+    total_desired = sum(desired_columns)
+    actual_widths = [int(x / total_desired * screen_width) for x in desired_columns]
+    actual_widths[-1] += screen_width - sum(actual_widths)
+    return actual_widths

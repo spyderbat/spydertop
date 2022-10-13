@@ -22,7 +22,7 @@ contained in Spydertop.
 #         Everything in config.settings (that fits)
 #         Color scheme
 
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 from asciimatics.screen import Screen
 from asciimatics.widgets import (
     Frame,
@@ -40,6 +40,7 @@ from spydertop.constants.columns import (
     SESSION_COLUMNS,
     CONNECTION_COLUMNS,
     LISTENING_SOCKET_COLUMNS,
+    Column,
 )
 from spydertop.model import AppModel
 from ..utils import is_event_in_widget
@@ -48,14 +49,14 @@ from ..utils import is_event_in_widget
 # some of these are only necessary due to python's lambda behavior
 
 
-def change_columns(columns, name):
+def change_columns(columns: List[Column], name):
     """Create a lambda to enable/disable a column"""
 
     def inner(enabled, model):
-        for i, col in enumerate(columns):
-            if col[0] == name:
+        for col in columns:
+            if col.header_name == name:
                 model.columns_changed = True
-                columns[i] = (col[0], col[1], col[2], col[3], col[4], enabled)
+                col.enabled = enabled
                 return
 
     return inner

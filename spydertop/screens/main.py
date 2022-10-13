@@ -5,8 +5,6 @@
 # Copyright 2022 Spyderbat, Inc. All rights reserved.
 #
 
-# pylint: disable=too-many-lines
-
 """
 The main frame for the tool. This frame contains the record list and usage metrics,
 as well as showing all the menu buttons.
@@ -44,12 +42,8 @@ from spydertop.screens.meters import (
 )
 from spydertop.screens.modals import InputModal, NotificationModal
 from spydertop.widgets import Table
-from spydertop.utils import (
-    log,
-    convert_to_seconds,
-    pretty_time,
-)
-from spydertop.utils.types import BetterDefaultDict, ExtendedParser
+from spydertop.utils import log, convert_to_seconds, pretty_time, calculate_widths
+from spydertop.utils.types import ExtendedParser
 from spydertop.constants import API_LOG_TYPES
 from spydertop.constants.columns import (
     PROCESS_COLUMNS,
@@ -57,6 +51,7 @@ from spydertop.constants.columns import (
     CONNECTION_COLUMNS,
     FLAG_COLUMNS,
     LISTENING_SOCKET_COLUMNS,
+    Column,
 )
 from spydertop.widgets import FuncLabel, Meter, Padding
 from spydertop.screens.footer import Footer
@@ -77,7 +72,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     _cached_options: Optional[List] = None
     _cached_sortable: Optional[List] = None
     _cached_displayable: Optional[List] = None
-    _current_columns: List = PROCESS_COLUMNS
+    _current_columns: List[Column] = PROCESS_COLUMNS
     _old_column_val = None
     _last_effects: int = 1
 
@@ -195,7 +190,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         header.add_widget(Padding(), 1)
 
         ################# Main Table Tabs #######################
-        tabs_layout = Layout(self.calculate_widths([1] * 5))
+        tabs_layout = Layout(calculate_widths(self.screen.width, [1] * 5))
         self._tabs = []
         self.add_layout(tabs_layout)
         for i, name in enumerate(
@@ -227,7 +222,9 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             parser=ExtendedParser(),
             color="focus_button",
         )
-        self._footer = Footer(self.calculate_widths([1] * 10 + [3]), self, [], status)
+        self._footer = Footer(
+            calculate_widths(self.screen.width, [1] * 10 + [3]), self, [], status
+        )
         self.add_layout(self._footer)
         self._switch_buttons("main")
 
@@ -313,7 +310,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
         # update columns if needed
         if self._model.columns_changed:
-            self._columns.set_columns(self._current_columns)
+            self._columns.columns = self._current_columns
             self._model.columns_changed = False
             self.needs_screen_refresh = True
 
@@ -326,7 +323,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             # work up the caching system, updating each part of the cache
             # only if necessary
             if self.needs_recalculate:
-                self._build_options()
+                self._build_options(getattr(self._model, self._model.config["tab"]))
                 self.needs_recalculate = False
                 self.needs_update = True
 
@@ -425,154 +422,48 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     # -- update handling -- #
     def _update_columns(self):
         """Update the columns in the multi-column list box widget."""
-        self._columns.set_columns(self._current_columns)
+        self._columns.columns = self._current_columns
         self._columns.set_rows(self._cached_displayable, self._cached_sortable)
 
-    def _build_options(self):
-        """Build the options for the records table, depending on the current tab."""
-        if self._model.config["tab"] == "processes":
-            (
-                self._cached_displayable,
-                self._cached_sortable,
-            ) = self._build_process_options()
-
-        if self._model.config["tab"] == "sessions":
-            (
-                self._cached_displayable,
-                self._cached_sortable,
-            ) = self._build_other_options(self._model.sessions)
-
-        if self._model.config["tab"] == "flags":
-            (
-                self._cached_displayable,
-                self._cached_sortable,
-            ) = self._build_other_options(self._model.flags)
-
-        if self._model.config["tab"] == "connections":
-            (
-                self._cached_displayable,
-                self._cached_sortable,
-            ) = self._build_other_options(self._model.connections)
-
-        if self._model.config["tab"] == "listening":
-            (
-                self._cached_displayable,
-                self._cached_sortable,
-            ) = self._build_other_options(self._model.listening)
-
-    def _build_other_options(self, records: Dict[str, Any]) -> Tuple[List, List]:
+    def _build_options(self, records: Dict[str, Any]) -> Tuple[List, List]:
         """Builds options for records other than the processes tab, using
         the current columns"""
-        rows = []
-        sortable_rows = []
+        self._cached_displayable = []
+        self._cached_sortable = []
 
         for record in records.values():
             # determine if the record is visible for this time
             if "valid_from" in record:
-                if record["valid_from"] > self._model.timestamp:
-                    continue
-                end_time = record.get("valid_to", None)
-                if (
-                    end_time is not None
-                    and end_time < self._model.timestamp - self._model.time_elapsed
+                if record["valid_from"] > self._model.timestamp or (
+                    "valid_to" in record
+                    and record["valid_to"]
+                    < self._model.timestamp - self._model.time_elapsed
                 ):
                     continue
             elif "time" in record:
                 # show all events only after they occur
                 if self._model.timestamp < record["time"]:
                     continue
-            # build the row for options
-            cells = []
-            sortable_cells = []
-            for col in self._current_columns:
-                sort_val = col[4](self._model, record)
-                # pylint: disable=no-value-for-parameter
-                cells.append(str(col[1](self._model, record)))
-                sortable_cells.append(sort_val)
 
-            rows.append(cells)
-            sortable_rows.append(sortable_cells)
-
-        return rows, sortable_rows
-
-    def _build_process_options(  # pylint: disable=too-many-locals
-        self,
-    ) -> Tuple[List, List]:
-        """Build options for the processes tab. This requires more work than
-        the other tabs, because the data is not in a single record; the
-        event_top data is also required to be bundled in"""
-        model_processes = self._model.processes
-        previous_et_processes, event_top_processes = self._model.get_top_processes()
-        defaults = (
-            event_top_processes["default"]
-            if event_top_processes is not None
-            else BetterDefaultDict(lambda k: nan if k != "state" else "?")
-        )
-
-        rows = []
-        sortable_rows = []
-
-        # loop through the process records, and fill in the event_top data
-        # if it is available
-        for process in model_processes.values():
-            # determine if the record is visible in this time period
-            if process["valid_from"] > self._model.timestamp:
-                continue
-            end_time = process.get("valid_to", None)
-            if end_time is not None and end_time < self._model.timestamp - self._model.time_elapsed:
-                continue
-
-            # ignore if the process is hidden
-            if (
+            # ignore if the record is a process and it is hidden
+            if self._model.config["tab"] == "processes" and (
                 self._model.config["hide_kthreads"]
-                and process["type"] == "kernel thread"
+                and record["type"] == "kernel thread"
+                or self._model.config["hide_threads"]
+                and record["type"] == "thread"
             ):
                 continue
-            if self._model.config["hide_threads"] and process["type"] == "thread":
-                continue
-
-            pid = str(process["pid"])
-
-            # if the process is a thread, it may not have a value in the event_top processes
-            if (
-                event_top_processes is not None
-                and previous_et_processes is not None
-                and pid in event_top_processes
-                and pid in previous_et_processes
-            ):
-                et_process = event_top_processes[pid]
-                prev_et_process = previous_et_processes[pid]
-            else:
-                et_process = None
-                prev_et_process = None
 
             # build the row for options
             cells = []
             sortable_cells = []
             for col in self._current_columns:
-                # expand the event_top data with defaults
-                if et_process is not None:
-                    full = defaults.copy()
-                    full.update(et_process)
-
-                    prev_full = defaults.copy()
-                    prev_full.update(prev_et_process)
-                else:
-                    full = None
-                    prev_full = None
-
-                # call the column functions with the full data
-                sort_val = col[4](self._model, prev_full, full, process)
-                cell_val = col[1](self._model, prev_full, full, process)
-                if cell_val is None:
-                    cell_val = ""
-                cells.append(str(cell_val))
+                sort_val = col.get_value(self._model, record)
+                cells.append(col.format_value(self._model, record, sort_val))
                 sortable_cells.append(sort_val)
 
-            rows.append(cells)
-            sortable_rows.append(sortable_cells)
-
-        return rows, sortable_rows
+            self._cached_displayable.append(cells)
+            self._cached_sortable.append(sortable_cells)
 
     # -- input handling -- #
     def _enable_disable(self):
@@ -719,7 +610,9 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         menu = InputModal(
             self.screen,
             label="Sort By:",
-            options=[(row[0], row[0]) for row in self._current_columns],
+            options=[
+                (row.header_name, row.header_name) for row in self._current_columns
+            ],
             on_submit=set_sort,
             widget=ListBox,
             theme=self._model.config["theme"],
@@ -854,7 +747,9 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
         # convert the sorted rows to a human-readable string
         data_lines = ""
-        for (name, value) in zip([c[0] for c in self._current_columns], row[0]):
+        for (name, value) in zip(
+            [c.header_name for c in self._current_columns], row[0]
+        ):
             # remove any tree characters
             if isinstance(value, ColouredText):
                 value = value.raw_text
@@ -949,15 +844,6 @@ Some information displayed may not be accurate\
         if name == "collapse_tree":
             self._model.rebuild_tree()
             self._columns.tree = self._model.tree
-
-    # -- miscellaneous -- #
-    def calculate_widths(self, desired_columns: List[int]) -> List[int]:
-        """Manually calculate the widths for a Layout, as the default has rounding errors."""
-        total_width = self.screen.width
-        total_desired = sum(desired_columns)
-        actual_widths = [int(x / total_desired * total_width) for x in desired_columns]
-        actual_widths[-1] += total_width - sum(actual_widths)
-        return actual_widths
 
     # -- moving to other frames -- #
     def _back(self):
