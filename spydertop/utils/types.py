@@ -12,7 +12,6 @@ Custom or modified types for use in the application.
 import bisect
 from enum import Enum
 import re
-from datetime import datetime
 from textwrap import TextWrapper
 import traceback
 from typing import Dict, List, NewType, Optional, Tuple, Union, Any
@@ -24,12 +23,10 @@ from asciimatics.parsers import Parser
 from spydertop.constants import COLOR_REGEX
 
 # custom types for data held in the model
-Tree = NewType("Tree", Dict[str, Tuple[bool, Optional["Tree"]]])
+Tree = NewType("Tree", Dict[str, Optional[Tuple[bool, "Tree"]]])
 RecordInternal = NewType(
     "RecordInternal",
-    Dict[
-        str, Union[str, int, float, Dict[str, "RecordInternal"], List["RecordInternal"]]
-    ],
+    Any,
 )
 Record = NewType("Record", Dict[str, RecordInternal])
 
@@ -100,6 +97,21 @@ class Status(Enum):
     PARKED = "P"
     UNKNOWN = "?"
 
+    def __lt__(self, other: "Status") -> bool:
+        return self.value < other.value
+
+    def __gt__(self, other: "Status") -> bool:
+        return self.value > other.value
+
+    def __le__(self, other: "Status") -> bool:
+        return self.value <= other.value
+
+    def __ge__(self, other: "Status") -> bool:
+        return self.value >= other.value
+
+    def __str__(self) -> str:
+        return self.value
+
 
 class Severity(Enum):
     """Severity levels for flags."""
@@ -136,17 +148,20 @@ class DelayedLog:
     log_level: int
     logger: Optional[logging.Logger] = None
 
+    TRACEBACK = logging.DEBUG - 1
     DEBUG = logging.DEBUG
     INFO = logging.INFO
     WARN = logging.WARN
     ERR = logging.ERROR
     LOG_FG_COLORS = {
+        logging.DEBUG - 1: "white",
         logging.DEBUG: "black",
         logging.INFO: "black",
         logging.WARN: "black",
         logging.ERROR: "black",
     }
     LOG_BG_COLORS = {
+        logging.DEBUG - 1: "black",
         logging.DEBUG: "blue",
         logging.INFO: "white",
         logging.WARN: "yellow",
@@ -208,7 +223,7 @@ class DelayedLog:
                     type(exception), exception, exception.__traceback__
                 )
             ),
-            log_level=self.DEBUG,
+            log_level=self.TRACEBACK,
         )
 
     def __del__(self):
@@ -406,7 +421,7 @@ class TimeSpanTracker:
         # we need to remove all the times between the start and end indices
         self.times = self.times[: start_index + 1] + self.times[end_index:]
 
-    def is_loaded(self, time: datetime):
+    def is_loaded(self, time: float):
         """Return whether the given time has been loaded."""
         # locate the correct place for the time
         index = bisect.bisect_left(self.times, time)
@@ -446,6 +461,8 @@ class ExtendedParser(Parser):
     _color_regex = re.compile(COLOR_REGEX)
 
     def parse(self):
+        if self._state is None or self._state.text is None:
+            return
         if self._state.attributes:
             yield (0, Parser.CHANGE_COLOURS, tuple(self._state.attributes))
         offset = last_offset = 0

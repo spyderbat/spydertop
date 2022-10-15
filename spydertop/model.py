@@ -56,7 +56,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
 
     _timestamp: Optional[float]
     _time_elapsed: float = 0
-    _last_good_timestamp: float = None
+    _last_good_timestamp: Optional[float] = None
     _time_span_tracker: TimeSpanTracker = TimeSpanTracker()
     _session_id: str
     _http_client: urllib3.PoolManager
@@ -68,6 +68,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
         "model_machine": {},
         "model_listening_socket": {},
         "event_redflag": {},
+        "model_container": {},
     }
     _tree: Optional[Tree] = None
     _top_ids: Set[str] = set()
@@ -129,10 +130,56 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
 
             self.api_client = spyderbat_api.ApiClient(configuration)
 
-    def load_data(  # pylint: disable=too-many-statements
+    def load_from_api(
         self,
-        timestamp: float,
-        duration: timedelta = None,
+        api_instance: source_data_api.SourceDataApi,
+        input_data: dict,
+        datatype: str,
+    ) -> bytes:
+        """Load data from the API with a specified type"""
+        log.debug({"org_uid": self.config.org, "dt": "spydergraph", **input_data})
+        try:
+            api_response: urllib3.HTTPResponse = api_instance.src_data_query_v2(
+                org_uid=self.config.org,
+                dt=datatype,
+                **input_data,
+                _preload_content=False,
+            )
+            newline = b"\n"
+            log.debug(
+                f"Context-uid in response: {api_response.headers.get('x-context-uid', None)}, \
+status: {api_response.status}, size: {len(api_response.data.split(newline))}"
+            )
+        except spyderbat_api.ApiException as exc:
+            self.fail(f"Loading data from the api failed with reason: {exc.reason}")
+            log.traceback(exc)
+            log.debug(
+                f"""\
+Debug info:
+URL requested: {self.config.input}/api/v1/source/query/
+Method: POST
+Input data: {input_data}
+Data type: {datatype}
+Status code: {exc.status}
+Reason: {exc.reason}
+Body: {exc.body}
+Context-UID: {exc.headers.get("x-context-uid", None) if exc.headers else None}\
+"""
+            )
+            return b""
+        except MaxRetryError as exc:
+            self.fail(
+                f"There was an issue trying to connect to the API. \
+Is the url {self.config.input} correct?"
+            )
+            log.traceback(exc)
+            return b""
+        return api_response.data
+
+    def load_data(
+        self,
+        timestamp: Optional[float],
+        duration: Optional[timedelta] = None,
         before=timedelta(seconds=120),
     ) -> None:
         """Load data from the source, either the API or a file, then process it"""
@@ -148,6 +195,10 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
 
         if isinstance(source, str):
             # url, load data from api
+
+            if timestamp is None:
+                self.fail("No start time specified")
+                return
 
             api_instance = source_data_api.SourceDataApi(self.api_client)
             input_data = {
@@ -165,84 +216,11 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
 
             log.log(self._time_span_tracker.times)
 
-            try:
-                log.info("Querying api for spydergraph records")
-                self.progress = 0.1
-                log.debug(
-                    {"org_uid": self.config.org, "dt": "spydergraph", **input_data}
-                )
-                api_response: urllib3.HTTPResponse = api_instance.src_data_query_v2(
-                    org_uid=self.config.org,
-                    dt="spydergraph",
-                    **input_data,
-                    _preload_content=False,
-                )
-                newline = b"\n"
-                log.debug(
-                    f"Context-uid in response: {api_response.headers.get('x-context-uid', None)}, \
-status: {api_response.status}, size: {len(api_response.data.split(newline))}"
-                )
-                lines += api_response.data.split(b"\n")
-
-                self.progress = 0.5
-
-                log.info("Querying api for resource usage records")
-                log.debug({"org_uid": self.config.org, "dt": "htop", **input_data})
-                api_response = api_instance.src_data_query_v2(
-                    org_uid=self.config.org,
-                    dt="htop",
-                    **input_data,
-                    _preload_content=False,
-                )
-                log.debug(
-                    f"Context-uid in response: {api_response.headers.get('x-context-uid', None)}, \
-status: {api_response.status}, size: {len(api_response.data.split(newline))}"
-                )
-                lines += api_response.data.split(b"\n")
-                self.log_api(
-                    API_LOG_TYPES["loaded_data"],
-                    {
-                        "count": len(lines),
-                        "source_id": input_data["src"],
-                        "start_time": input_data["st"],
-                        "end_time": input_data["et"],
-                    },
-                )
-            except spyderbat_api.ApiException as exc:
-                self.fail(f"Loading data from the api failed with reason: {exc.reason}")
-                log.traceback(exc)
-                log.debug(
-                    f"""\
-Debug info:
-    URL requested: {source}/api/v1/source/query/
-    Method: POST
-    Input data: {input_data}
-    Status code: {exc.status}
-    Reason: {exc.reason}
-    Body: {exc.body}
-    Context-UID: {exc.headers.get("x-context-uid", None)}\
-                            """
-                )
-                return
-            except MaxRetryError as exc:
-                self.fail(
-                    f"There was an issue trying to connect to the API. Is the url {source} correct?"
-                )
-                log.traceback(exc)
-                return
-            except Exception as exc:  # pylint: disable=broad-except
-                self.fail("An exception occurred when trying to load from the api.")
-                log.traceback(exc)
-                log.debug(
-                    f"""\
-Debug info:
-    URL requested: {source}/api/v1/source/query/
-    Method: POST
-    Input data: {input_data}\
-                            """
-                )
-                return
-
+            lines += self.load_from_api(api_instance, input_data, "spydergraph").split(
+                b"\n"
+            )
+            lines += self.load_from_api(api_instance, input_data, "htop").split(b"\n")
+            lines += self.load_from_api(api_instance, input_data, "k8s").split(b"\n")
         else:
             # file, read in records and parse
             log.info(f"Reading records from input file: {source.name}")
@@ -262,7 +240,7 @@ No more records can be loaded."
         if self.config.output:
             # if lines is still binary, convert to text
             if len(lines) > 0 and isinstance(lines[0], bytes):
-                lines = [line.decode("utf-8") for line in lines]
+                lines = [line.decode("utf-8") for line in lines]  # type: ignore
             self.config.output.write("\n".join([l.rstrip() for l in lines]))
 
         self._process_records(lines)
@@ -300,6 +278,8 @@ Are you asking for the wrong time?"
                     continue
                 self._top_ids.add(record["id"])
                 event_tops.append(record)
+            if record["schema"].startswith("model_container"):
+                self._records["model_container"][record["container_id"]] = record
             else:
                 short_schema = record["schema"].split(":")[0]
 
@@ -347,7 +327,7 @@ Are you asking for the wrong time?"
             self._tops.update_cursor(self._timestamp)
             # if the time is None, there was no specified time, so
             # go back to the beginning of the records
-            if self.timestamp is None:
+            if self._timestamp is None:
                 self.recover("reload")
                 return
 
@@ -420,7 +400,7 @@ not enough information could be loaded.\
     @staticmethod
     def _make_branch(
         rec_id: str, processes_w_children: Dict[str, List], enabled: bool
-    ) -> Tuple[bool, Tree]:
+    ) -> Optional[Tuple[bool, Tree]]:
         """Recursively create a tree branch for a process"""
         # branches are tuples of (enabled, {child id: branch})
         if processes_w_children[rec_id] == []:
@@ -430,7 +410,7 @@ not enough information could be loaded.\
             branch[1][child] = AppModel._make_branch(
                 child, processes_w_children, enabled
             )
-        return branch
+        return branch  # type: ignore
 
     def get_orgs(self) -> Optional[List[org_api.Org]]:
         """Fetch a list of organization for this api_key"""
@@ -451,7 +431,10 @@ not enough information could be loaded.\
             return None
 
     def get_sources(
-        self, page: int = None, page_size: int = None, uid: str = None
+        self,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        uid: Optional[str] = None,
     ) -> Optional[List[Dict]]:
         """Fetch a list of sources for this api_key"""
         # this tends to take a long time for large organizations
@@ -471,12 +454,12 @@ not enough information could be loaded.\
                 kwargs["page_size"] = page_size
             if uid is not None:
                 kwargs["agent_uid_equals"] = uid
-            sources: urllib3.HTTPResponse = api_instance.src_list(
+            raw_sources: urllib3.HTTPResponse = api_instance.src_list(
                 org_uid=self.config.org,
                 _preload_content=False,
                 **kwargs,
             )
-            sources: List = json.loads(sources.data)
+            sources: List = json.loads(raw_sources.data)
             self.log_api(API_LOG_TYPES["sources"], {"count": len(sources)})
 
             return sources
@@ -539,7 +522,9 @@ not enough information could be loaded.\
 
     def get_top_processes(
         self,
-    ) -> Tuple[Dict[str, Union[str, int]], Dict[str, Union[str, int]]]:
+    ) -> Tuple[
+        Optional[Dict[str, Union[str, int]]], Optional[Dict[str, Union[str, int]]]
+    ]:
         """Get the resource usage records for the processes at the current time"""
         if not self.tops_valid():
             return None, None
@@ -567,15 +552,15 @@ not enough information could be loaded.\
                 if proc["ppuid"] is not None:
                     processes_w_children[proc["ppuid"]].append(proc["id"])
                 if proc["pid"] == 1:
-                    init = proc["id"]
+                    init = str(proc["id"])
                 if proc["pid"] == 2:
-                    kthreadd = proc["id"]
+                    kthreadd = str(proc["id"])
             except KeyError as exc:
                 log.err(f"Process {exc} is missing.")
                 log.traceback(exc)
                 continue
 
-        self._tree = {}
+        self._tree = {}  # type: ignore
 
         # add the root processes to the tree
         if kthreadd:
@@ -627,6 +612,9 @@ not enough information could be loaded.\
 
             elif method == "retry":
                 log.info("Retrying loading from the API.")
+                if self._timestamp is None:
+                    self.fail("No timestamp to retry loading from.")
+                    return
                 self.load_data(self._timestamp)
 
             elif isinstance(method, float):
@@ -704,6 +692,7 @@ not enough information could be loaded.\
             "model_machine": {},
             "model_listening_socket": {},
             "event_redflag": {},
+            "model_container": {},
         }
         self._tree = None
         self._top_ids = set()
@@ -741,7 +730,7 @@ not enough information could be loaded.\
         )
 
     @property
-    def memory(self) -> Dict[str, int]:
+    def memory(self) -> Optional[Dict[str, int]]:
         """The most recent memory usage data"""
         if not self.tops_valid():
             return None
@@ -778,6 +767,11 @@ not enough information could be loaded.\
         return self._records["model_session"]
 
     @property
+    def containers(self) -> Dict[str, Record]:
+        """All currently loaded container records"""
+        return self._records["model_container"]
+
+    @property
     def tree(self) -> Tree:
         """A tree representation of all processes, in the format:
 
@@ -803,12 +797,12 @@ not enough information could be loaded.\
         )
 
     @property
-    def timestamp(self) -> float:
+    def timestamp(self) -> Optional[float]:
         """The current time, as a float"""
         return self._timestamp
 
     @timestamp.setter
-    def timestamp(self, value: float) -> None:
+    def timestamp(self, value: Optional[float]) -> None:
         # set the current time and fix the state
         self._timestamp = value
         self._fix_state()

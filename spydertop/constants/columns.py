@@ -18,6 +18,7 @@ from typing import Any, Optional, Type, Callable, TYPE_CHECKING
 
 from spydertop.utils import (
     get_timezone,
+    map_optional,
     pretty_address,
     pretty_time,
     log,
@@ -44,19 +45,19 @@ class Column:
     value_type: Type = Any
     enabled: bool
     align: Alignment
-    value_getter: Callable[[AppModel, Record], value_type]
-    value_formatter: Callable[[AppModel, Record, value_type], str]
+    value_getter: Callable[[AppModel, Record], Any]
+    value_formatter: Callable[[AppModel, Record, Any], str]
 
     def __init__(  # pylint: disable=too-many-arguments
         self,
         name: str,
         max_width: int,
         value_type: Type,
-        align: Alignment = None,
+        align: Optional[Alignment] = None,
         enabled=True,
-        field: str = None,
-        value_getter: Callable[[AppModel, Record], value_type] = None,
-        value_formatter: Callable[[AppModel, Record, value_type], str] = None,
+        field: Optional[str] = None,
+        value_getter: Optional[Callable[[AppModel, Record], Any]] = None,
+        value_formatter: Optional[Callable[[AppModel, Record, Any], str]] = None,
     ) -> None:
         self.header_name = name
         self.max_width = max_width
@@ -67,17 +68,17 @@ class Column:
             else Alignment.LEFT
         )
         self.enabled = enabled
-        field = field or name.lower()
+        str_field: str = field or name.lower()
         if value_type is datetime:
             self.value_getter = value_getter or (
-                lambda m, r: datetime.fromtimestamp(r[field], timezone.utc).astimezone(
-                    get_timezone(m)
-                )
+                lambda m, r: datetime.fromtimestamp(
+                    float(r[str_field]), timezone.utc
+                ).astimezone(get_timezone(m))
                 if field in r
                 else None
             )
         else:
-            self.value_getter = value_getter or (lambda m, r: value_type(r[field]))
+            self.value_getter = value_getter or (lambda m, r: value_type(r[str_field]))
         self.value_formatter = value_formatter or (lambda m, r, v: str(v))
 
     def __getitem__(self, key: int) -> Any:
@@ -179,6 +180,16 @@ def format_environ(_m, _p, environ: dict[str, str]):
     return "\n".join(environ_lines)
 
 
+def format_container(model: AppModel, _p, container: str):
+    """Formats the container information"""
+    container_rec = model.containers.get(container)
+    if container_rec is None:
+        return ""
+    color = "${2,1}" if container_rec["container_state"] == "running" else "${8,1}"
+    return f"{container_rec['image']}#{container_rec['container_short_id']} \
+[{color}{container_rec['container_state']}${{-1,0}}]"
+
+
 def get_resource_record(
     model: AppModel, process_record: Record, previous=False
 ) -> Optional[Record]:
@@ -226,18 +237,18 @@ PROCESS_COLUMNS = [
         "PRI",
         3,
         int,
-        value_getter=lambda m, x: int(get_resource_record(m, x)["priority"])
-        if get_resource_record(m, x) is not None
-        else None,
+        value_getter=lambda m, x: map_optional(
+            (lambda x: int(x["priority"])), get_resource_record(m, x)
+        ),
         value_formatter=lambda m, r, x: str(x) if x is not None else "${8,1}?",
     ),
     Column(
         "NI",
         3,
         int,
-        value_getter=lambda m, x: int(get_resource_record(m, x)["nice"])
-        if get_resource_record(m, x) is not None
-        else None,
+        value_getter=lambda m, x: map_optional(
+            (lambda x: int(x["nice"])), get_resource_record(m, x)
+        ),
         value_formatter=lambda m, r, x: str(x) if x is not None else "${8,1}?",
     ),
     Column(
@@ -245,36 +256,37 @@ PROCESS_COLUMNS = [
         5,
         Bytes,
         align=Alignment.RIGHT,
-        value_getter=lambda m, x: Bytes(get_resource_record(m, x)["vsize"])
-        if get_resource_record(m, x) is not None
-        else None,
+        value_getter=lambda m, x: map_optional(
+            (lambda x: Bytes(x["vsize"])), get_resource_record(m, x)
+        ),
     ),
     Column(
         "RES",
         5,
         Bytes,
         align=Alignment.RIGHT,
-        value_getter=lambda m, x: Bytes(get_resource_record(m, x)["rss"] * PAGE_SIZE)
-        if get_resource_record(m, x) is not None
-        else None,
+        value_getter=lambda m, x: map_optional(
+            (lambda x: Bytes(x["rss"])), get_resource_record(m, x)
+        ),
     ),
     Column(
         "SHR",
         5,
         Bytes,
         align=Alignment.RIGHT,
-        value_getter=lambda m, x: Bytes(get_resource_record(m, x)["shared"])
-        if get_resource_record(m, x) is not None
-        else None,
+        value_getter=lambda m, x: map_optional(
+            (lambda x: Bytes(x["shared"])), get_resource_record(m, x)
+        ),
     ),
     Column(
         "S",
         1,
         Status,
-        value_getter=lambda m, x: get_resource_record(m, x)["state"]
-        if get_resource_record(m, x)
-        else "?",
-        value_formatter=lambda m, r, x: "${8,1}" + x
+        value_getter=lambda m, x: map_optional(
+            (lambda x: Status(x["state"])), get_resource_record(m, x)
+        )
+        or Status.UNKNOWN,
+        value_formatter=lambda m, r, x: "${8,1}" + str(x)
         if x != Status.RUNNING
         else "${2}R",
     ),
@@ -333,8 +345,16 @@ PROCESS_COLUMNS = [
         value_formatter=lambda m, r, x: "/".join(x),
         enabled=False,
     ),
-    Column("CGROUP", 30, str, enabled=False),
+    Column("CGROUP", 20, str, enabled=False),
     Column("CONTAINER", 10, str, enabled=False),
+    Column(
+        "CONTAINER_DETAILS",
+        20,
+        str,
+        value_getter=lambda m, x: x.get("container", None),
+        value_formatter=format_container,
+        enabled=False,
+    ),
     Column(
         "ENVIRONMENT",
         11,
@@ -555,4 +575,41 @@ LISTENING_SOCKET_COLUMNS = [
     ),
     Column("PUID", 20, str, enabled=False),
     Column("PROCESS", 0, str, field="proc_name"),
+]
+
+########################### Containers ###########################
+
+
+def get_system(model: AppModel, cont: Record) -> Optional[str]:
+    """Get the system name for a container."""
+    muid = cont["muid"]
+    machine_rec = model.machine
+    if machine_rec is not None and muid == machine_rec["id"]:
+        return machine_rec["hostname"]
+    return None
+
+
+CONTAINER_COLUMNS = [
+    Column("ID", 42, str, enabled=False),
+    Column("START_TIME", 27, datetime, field="valid_from", enabled=False),
+    Column(
+        "AGE",
+        9,
+        timedelta,
+        value_getter=lambda m, c: timedelta(seconds=m.timestamp - c["valid_from"])
+        if "duration" not in c or "valid_to" not in c or c["valid_to"] > m.timestamp
+        else timedelta(seconds=c["duration"]),
+        value_formatter=lambda m, c, x: pretty_time(x.total_seconds()),
+    ),
+    Column("IMAGE", 12, str),
+    Column("IMAGE_ID", 10, str, enabled=False),
+    Column("SYSTEM", 15, str, value_getter=get_system),
+    Column(
+        "PATH",
+        15,
+        str,
+        value_formatter=lambda m, c, x: x if x != "/pause" else "${8,1}/pause",
+    ),
+    Column("CONT_ID", 10, str, field="container_id"),
+    Column("NAME", 0, str, field="container_name"),
 ]

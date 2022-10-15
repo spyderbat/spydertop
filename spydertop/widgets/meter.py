@@ -6,8 +6,8 @@
 #
 
 """
-This module contains a table widget which displays data in a tabular format.
-It extends the functionality of the asciimatics.widgets.MultiColumnListBox
+This module contains a meter widget which displays a range of values
+similarly to HTOP's CPU meter.
 """
 
 from typing import List

@@ -10,7 +10,7 @@ Various utilities for spydertop
 """
 
 from datetime import datetime, timezone
-from typing import Callable, List
+from typing import Callable, List, Optional, TypeVar
 
 from asciimatics.widgets.utilities import THEMES
 
@@ -19,6 +19,17 @@ from spydertop.utils.types import DelayedLog
 global log  # pylint: disable=global-at-module-level,invalid-name
 # the global log object, used everywhere
 log = DelayedLog()
+
+
+T = TypeVar("T")
+U = TypeVar("U")
+
+
+def map_optional(func: Callable[[T], U], value: Optional[T]) -> Optional[U]:
+    """Map a function over an optional value, returning None if the value is None"""
+    if value is None:
+        return None
+    return func(value)
 
 
 def pretty_time(time: float) -> str:
@@ -84,7 +95,7 @@ def header_bytes(n_bytes: int) -> str:
         if n_bytes < 100:
             n_bytes = round(n_bytes, 2)
             return f"{n_bytes}{suffix}"
-        n_bytes /= 1024
+        n_bytes = int(n_bytes / 1024)
     return f"{n_bytes}P"
 
 

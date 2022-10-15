@@ -12,8 +12,8 @@ as well as showing all the menu buttons.
 
 from math import nan
 import re
-from typing import Any, Dict, List, Optional, Tuple
-import urllib
+from typing import Any, Dict, List, Optional
+import urllib.parse
 import webbrowser
 
 import pyperclip
@@ -46,6 +46,7 @@ from spydertop.utils import log, convert_to_seconds, pretty_time, calculate_widt
 from spydertop.utils.types import ExtendedParser
 from spydertop.constants import API_LOG_TYPES
 from spydertop.constants.columns import (
+    CONTAINER_COLUMNS,
     PROCESS_COLUMNS,
     SESSION_COLUMNS,
     CONNECTION_COLUMNS,
@@ -70,14 +71,14 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     needs_update: bool = True
     needs_recalculate: bool = True
     _cached_options: Optional[List] = None
-    _cached_sortable: Optional[List] = None
-    _cached_displayable: Optional[List] = None
+    _cached_sortable: List = []
+    _cached_displayable: List = []
     _current_columns: List[Column] = PROCESS_COLUMNS
     _old_column_val = None
     _last_effects: int = 1
 
     # widgets
-    _main: Layout = None
+    _main: Layout
     _footer: Footer
     _cpus: List[Meter] = []
     _tabs: List[Button] = []
@@ -190,11 +191,11 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         header.add_widget(Padding(), 1)
 
         ################# Main Table Tabs #######################
-        tabs_layout = Layout(calculate_widths(self.screen.width, [1] * 5))
+        tabs_layout = Layout(calculate_widths(self.screen.width, [1] * 6))
         self._tabs = []
         self.add_layout(tabs_layout)
         for i, name in enumerate(
-            ["Processes", "Flags", "Sessions", "Connections", "Listening"]
+            ["Processes", "Flags", "Sessions", "Connections", "Listening", "Containers"]
         ):
 
             def wrapper(name):
@@ -237,6 +238,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     # -- overrides -- #
     def update(self, frame_no):  # pylint: disable=too-many-branches,too-many-statements
         conf = self._model.config
+        assert self.scene is not None, "Frame must be added to a scene before updating"
 
         # if model is in failure state, raise next scene
         if self._model.failed:
@@ -315,8 +317,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             self.needs_screen_refresh = True
 
         # detect changes in effects (opened/closed)
-        if len(self._scene.effects) != self._last_effects:
-            self._last_effects = len(self._scene.effects)
+        if len(self.scene.effects) != self._last_effects:
+            self._last_effects = len(self.scene.effects)
             self.needs_screen_refresh = True
 
         try:
@@ -336,13 +338,16 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             if self.needs_screen_refresh:
                 # update header
                 for (i, cpu) in enumerate(self._cpus):
-                    cpu.value = update_cpu(i, self._model)
+                    values = update_cpu(i, self._model)
+                    cpu.value = values
                 (total, values) = update_memory(self._model)
-                self._memory.total = total
-                self._memory.value = values
+                if total is not None and values is not None:
+                    self._memory.total = total
+                    self._memory.value = values
                 (total, values) = update_swap(self._model)
-                self._swap.total = total
-                self._swap.value = values
+                if total is not None and values is not None:
+                    self._swap.total = total
+                    self._swap.value = values
 
                 self.needs_screen_refresh = False
                 # time screen update
@@ -375,6 +380,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             "s": lambda: self._switch_to_tab("sessions"),
             "c": lambda: self._switch_to_tab("connections"),
             "l": lambda: self._switch_to_tab("listening"),
+            "n": lambda: self._switch_to_tab("containers"),
             " ": self._play,
             "C": self._show_setup,
             "S": self._show_setup,
@@ -425,11 +431,16 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self._columns.columns = self._current_columns
         self._columns.set_rows(self._cached_displayable, self._cached_sortable)
 
-    def _build_options(self, records: Dict[str, Any]) -> Tuple[List, List]:
+    def _build_options(self, records: Dict[str, Any]):
         """Builds options for records other than the processes tab, using
         the current columns"""
         self._cached_displayable = []
         self._cached_sortable = []
+
+        if self._model.timestamp is None:
+            self._model.recover()
+            self.needs_recalculate = True
+            return
 
         for record in records.values():
             # determine if the record is visible for this time
@@ -565,7 +576,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self._model.config["sort_column"] = None
         self._model.config["filter"] = None
         self._cached_options = None
-        self._cached_sortable = None
+        self._cached_sortable = []
 
         self._model.log_api(API_LOG_TYPES["navigation"], {"tab": tab_name})
 
@@ -598,6 +609,11 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             self._model.config["sort_column"] = "DURATION"
             self._model.config["sort_ascending"] = True
 
+        if tab_name == "containers":
+            self._current_columns = CONTAINER_COLUMNS
+            self._model.config["sort_column"] = "AGE"
+            self._model.config["sort_ascending"] = True
+
     def _show_sort_menu(self):
         """show the sort menu"""
         self._model.log_api(API_LOG_TYPES["navigation"], {"menu": "sort"})
@@ -620,7 +636,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             value=self._model.config["sort_column"],
             on_death=lambda: self._switch_buttons("main"),
         )
-        self._scene.add_effect(menu)
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        self.scene.add_effect(menu)
 
     def _show_search(self):
         """show the search input modal"""
@@ -633,7 +650,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             self._columns.find(value)
             self.needs_screen_refresh = True
 
-        self._scene.add_effect(
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        self.scene.add_effect(
             InputModal(
                 self.screen,
                 label="Search:",
@@ -656,7 +674,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             except (ValueError, IndexError):
                 return False
 
-        self._scene.add_effect(
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        self.scene.add_effect(
             InputModal(
                 self.screen,
                 label="Custom Time Offset:",
@@ -675,7 +694,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         def set_filter(value):
             self._model.config["filter"] = value
 
-        self._scene.add_effect(
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        self.scene.add_effect(
             InputModal(
                 self.screen,
                 self._model.config["filter"],
@@ -698,7 +718,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             or not isinstance(self._model.config.input, str)
         ):
             log.info("No row selected or no org/machine/input. Skipping URL")
-            self._scene.add_effect(
+            assert self.scene is not None, "A scene must be set in the frame before use"
+            self.scene.add_effect(
                 NotificationModal(
                     self.screen,
                     text="${1,1}Error:${-1,2} Cannot create URL. "
@@ -726,7 +747,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         except Exception:  # pylint: disable=broad-except
             label = "Could not copy URL to the clipboard"
 
-        self._scene.add_effect(
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        self.scene.add_effect(
             NotificationModal(
                 self.screen,
                 text=f" {browser_label} \n {label} \n {url} ",
@@ -760,7 +782,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
         data_lines = data_lines.rstrip("\n")
 
-        self._scene.add_effect(
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        self.scene.add_effect(
             NotificationModal(
                 self.screen,
                 data_lines,
@@ -773,7 +796,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         """Show the setup screen"""
         self._model.log_api(API_LOG_TYPES["navigation"], {"menu": "setup"})
         self._switch_buttons("modal")
-        self._scene.add_effect(
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        self.scene.add_effect(
             SetupFrame(
                 self.screen,
                 self._model,
@@ -788,6 +812,10 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
     def _shift_time(self, offset: float):
         """Shift the time in Model by a given amount."""
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        if self._model.timestamp is None:
+            self._model.recover()
+            return
         # the minimum offset should be to the next top time
         min_offset = (
             self._model.time_elapsed if self._model.time_elapsed is not nan else 1
@@ -811,7 +839,7 @@ Some information displayed may not be accurate\
         # if the offset is large, notify the user
         if abs(offset) > 10:
             direction = "forward" if offset > 0 else "backward"
-            self._scene.add_effect(
+            self.scene.add_effect(
                 NotificationModal(
                     self.screen,
                     f"Moved {pretty_time(abs(round(offset)))} {direction}",
@@ -850,6 +878,7 @@ Some information displayed may not be accurate\
         """Move back to configuring sources"""
         # don't go back if the input is from a file
         if not isinstance(self._model.config.input, str):
+            assert self.scene is not None, "A scene must be set in the frame before use"
             self.scene.add_effect(
                 NotificationModal(
                     self.screen,
