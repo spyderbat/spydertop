@@ -113,7 +113,8 @@ class Config:  # pylint: disable=too-many-instance-attributes
         try:
             with open(
                 os.path.join(
-                    os.environ.get("HOME"), ".spyderbat-api/.spydertop-settings.yaml"
+                    os.environ.get("HOME"),  # type: ignore
+                    ".spyderbat-api/.spydertop-settings.yaml",  # type: ignore
                 ),
                 encoding="utf-8",
             ) as file:
@@ -181,7 +182,9 @@ Section default does not contain {exc.args[0]}, and it was not specified as a co
     def _load_config() -> Dict[str, Any]:
         """Loads the configuration file at $HOME/.spyderbat-api/config.yaml"""
         home = os.environ.get("HOME")
-        config_file_loc = os.path.join(home, ".spyderbat-api/config.yaml")
+        config_file_loc = os.path.join(
+            home, ".spyderbat-api/config.yaml"  # type: ignore
+        )
 
         with open(config_file_loc, encoding="utf-8") as file:
             file_config = yaml.safe_load(file)
@@ -190,7 +193,9 @@ Section default does not contain {exc.args[0]}, and it was not specified as a co
 
     def dump(self) -> None:
         """Saves the settings in a persistent configuration file"""
-        config_dir = os.path.join(os.environ.get("HOME"), ".spyderbat-api/")
+        config_dir = os.path.join(
+            os.environ.get("HOME"), ".spyderbat-api/"  # type: ignore
+        )
 
         # ensure that the config directory exists
         if not os.path.exists(config_dir):
@@ -240,7 +245,7 @@ config:
     input: {self.input}
     start_time: {self.start_time}
     start_duration: {self.start_duration}\
-        """
+"""
 
     def cleanup(self):
         """Perform cleanup of the associated data in the config"""
@@ -249,7 +254,7 @@ config:
         if self.input and not isinstance(self.input, str):
             self.input.close()
         # if the output is a gzip file, we need to close it manually
-        if hasattr(self.output, "close"):
+        if self.output is not None and hasattr(self.output, "close"):
             self.output.close()
 
     @property

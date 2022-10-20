@@ -25,9 +25,9 @@ class InputModal(Frame):
     """A modal frame for receiving input from the user"""
 
     _text_input: Widget
-    _on_change: Optional[Callable[[str], None]]
-    _on_submit: Optional[Callable[[str], None]]
-    _on_death: Optional[Callable[[], None]]
+    _on_change: Callable[[Optional[str]], None]
+    _on_submit: Callable[[str], None]
+    _on_death: Callable[[], None]
 
     def __init__(  # pylint: disable=too-many-arguments
         self,
@@ -35,7 +35,7 @@ class InputModal(Frame):
         value=None,
         width=40,
         theme="htop",
-        on_change: Optional[Callable[[str], None]] = None,
+        on_change: Optional[Callable[[Optional[str]], None]] = None,
         on_submit: Optional[Callable[[str], None]] = None,
         on_death: Optional[Callable[[], None]] = None,
         widget=Text,
@@ -90,24 +90,25 @@ class InputModal(Frame):
             self._text_input.value = value
 
     def process_event(self, event):
+        assert self.scene is not None
         if isinstance(event, KeyboardEvent):
             if event.key_code == ord("\n") or event.key_code == Screen.KEY_F10:
                 if self._text_input.is_valid:
                     self._on_submit(self._text_input.value)
-                self._scene.remove_effect(self)
+                self.scene.remove_effect(self)
                 self._on_death()
                 return None
             if event.key_code == Screen.KEY_ESCAPE:
                 # on escape, clear the input
                 self._on_change(None)
-                self._scene.remove_effect(self)
+                self.scene.remove_effect(self)
                 self._on_death()
                 return None
         elif isinstance(event, MouseEvent):
             if is_event_in_widget(event, self) and (event.buttons != 0):
                 # when a click is outside the modal, close it
                 self._on_change(None)
-                self._scene.remove_effect(self)
+                self.scene.remove_effect(self)
                 self._on_death()
                 return None
 
@@ -122,7 +123,7 @@ class NotificationModal(Frame):
         screen: Screen,
         text: str,
         parent: Frame,
-        frames=20,
+        frames: Optional[int] = 20,
         max_width: Optional[int] = None,
         **kwargs,
     ) -> None:
@@ -133,7 +134,7 @@ class NotificationModal(Frame):
         :param frames: The number of frames to display the notification (None for until closed)
         """
         if max_width is None:
-            max_width = screen.width // 2
+            max_width = int(screen.width) // 2
         self._label = FuncLabel(lambda: text, parser=ExtendedParser(), indent="    ")
         max_len = min(
             max(len(re.sub(COLOR_REGEX, "", line)) for line in text.split("\n")),
@@ -162,16 +163,17 @@ class NotificationModal(Frame):
         self.fix()
 
     def process_event(self, event):
+        assert self.scene is not None
         if isinstance(event, KeyboardEvent):
             if (
                 event.key_code == ord("\n")
                 or event.key_code == Screen.KEY_ESCAPE
                 or self.delete_count is None
             ):
-                self._scene.remove_effect(self)
+                self.scene.remove_effect(self)
                 return None
         if isinstance(event, MouseEvent) and event.buttons != 0:
-            self._scene.remove_effect(self)
+            self.scene.remove_effect(self)
         return self._parent.process_event(event)
 
     @property

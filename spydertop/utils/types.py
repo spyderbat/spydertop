@@ -24,10 +24,7 @@ from spydertop.constants import COLOR_REGEX
 
 # custom types for data held in the model
 Tree = NewType("Tree", Dict[str, Optional[Tuple[bool, "Tree"]]])
-RecordInternal = NewType(
-    "RecordInternal",
-    Any,
-)
+RecordInternal = NewType("RecordInternal", Any)
 Record = NewType("Record", Dict[str, RecordInternal])
 
 

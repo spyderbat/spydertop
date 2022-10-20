@@ -14,7 +14,7 @@ The Column class is used to define the columns that are displayed in the table.
 
 from datetime import datetime, timedelta, timezone
 import json
-from typing import Any, Optional, Type, Callable, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Type, Callable, TYPE_CHECKING
 
 from spydertop.utils import (
     get_timezone,
@@ -161,7 +161,7 @@ def get_time_plus_value(model: AppModel, process: Record):
     return timedelta(seconds=time)
 
 
-def color_cmd(_m, process: Record, args: list[str]):
+def color_cmd(_m, process: Record, args: List[str]):
     """Formats the command for the process"""
     base = f'{" ".join(args)}'
     color = ""
@@ -172,7 +172,7 @@ def color_cmd(_m, process: Record, args: list[str]):
     return color + base
 
 
-def format_environ(_m, _p, environ: dict[str, str]):
+def format_environ(_m, _p, environ: Dict[str, str]):
     """Format the environment of a process"""
     environ_lines = json.dumps(environ, indent=4, sort_keys=True).split("\n")
     if len(environ_lines) > 10:

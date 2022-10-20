@@ -11,7 +11,7 @@ It extends the functionality of the asciimatics.widgets.MultiColumnListBox
 """
 
 import re
-from typing import Any, Dict, List, NewType, Optional, Tuple
+from typing import Any, Dict, List, NewType, Optional, Tuple, Union
 
 from asciimatics.screen import Screen
 from asciimatics.event import KeyboardEvent, MouseEvent
@@ -25,7 +25,7 @@ from spydertop.constants import COLOR_REGEX
 from spydertop.model import AppModel, Tree
 from spydertop.config import Config
 
-InternalRow = NewType("InternalRow", Tuple[List[str], List[Any]])
+InternalRow = NewType("InternalRow", Tuple[List[Union[ColouredText, str]], List[Any]])
 
 
 class Table(Widget):  # pylint: disable=too-many-instance-attributes
@@ -36,13 +36,13 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
 
     tree: Tree
 
-    columns: List[Column] = {}
+    columns: List[Column] = []
     _rows: List[InternalRow] = []
     _filtered_rows: List[InternalRow] = []
     _tree_rows: Optional[List[InternalRow]] = None
 
     _config: Config
-    _parser: Parser = None
+    _parser: Parser
 
     _vertical_offset: int = 0
     _horizontal_offset: int = 0
@@ -68,6 +68,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
     def update(
         self, frame_no
     ):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+        assert self._frame is not None
         # select the followed id
         if self._state["id_to_follow"] is not None and self._config["follow_record"]:
             for i, row in enumerate(self._filtered_rows):
@@ -143,7 +144,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                             - sum(_.max_width + 1 for _ in self.columns if _.enabled)
                             + self._horizontal_offset
                         )
-                    line = displayable_row[j].replace("\n", " ")
+                    line = str(displayable_row[j]).replace("\n", " ")
                     # first, the space needed to pad the text to the correct alignment
                     # is calculated.
                     extra_space = width - len(re.sub(COLOR_REGEX, "", str(line)))
@@ -171,7 +172,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                         color,
                         attr,
                         background,
-                        colour_map=line.colour_map
+                        colour_map=line.colour_map  # type: ignore
                         if hasattr(line, "colour_map") and has_color
                         else None,
                     )
@@ -275,7 +276,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         if len(displayable_rows) != 0:
             assert len(displayable_rows[0]) == len(sortable_rows[0])
 
-        self._rows = list(zip(displayable_rows, sortable_rows))
+        self._rows = list(zip(displayable_rows, sortable_rows))  # type: ignore
         self.do_sort()
 
     def do_sort(self) -> None:
@@ -305,7 +306,9 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         value = self._config["filter"]
         rows = (
             self._tree_rows
-            if self._config["tree"] and self._config["tab"] == "processes"
+            if self._config["tree"]
+            and self._config["tab"] == "processes"
+            and self._tree_rows is not None
             else self._rows
         )
         if value is None:
@@ -341,12 +344,14 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                     elif row[1][index] <= float(column_match[1][1:]):
                         return False
                 # handle nots
-                elif column_match[1][0] == "!" and column_match[1][1:] in row[0][index]:
+                elif column_match[1][0] == "!" and column_match[1][1:] in str(
+                    row[0][index]
+                ):
                     return False
                 # handle case with no operator
-                elif (column_match[1][0] != "!") and not column_match[1] in row[0][
-                    index
-                ]:
+                elif (column_match[1][0] != "!") and not column_match[1] in str(
+                    row[0][index]
+                ):
                     return False
             except ValueError:
                 pass
@@ -410,7 +415,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         rows: Dict[str, Tuple],
         depth: int,
         parents_end: List[bool],
-    ) -> List[Tuple[Any, int]]:
+    ) -> List[InternalRow]:
         """Sort a level of the tree, appending sorted versions
         of the children underneath each row."""
         level = []
@@ -441,7 +446,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
             )
             if isinstance(new_displayable[-1], ColouredText):
                 new_displayable[-1] = ColouredText(
-                    prefix + new_displayable[-1].raw_text, self._parser
+                    prefix + new_displayable[-1].raw_text, self._parser  # type: ignore
                 )
             else:
                 new_displayable[-1] = prefix + new_displayable[-1]

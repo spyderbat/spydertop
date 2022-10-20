@@ -731,7 +731,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             return
 
         url = f"https://app.spyderbat.com/app/org/{self._model.config.org}\
-/source/{self._model.config.machine}/spyder-console?ids={urllib.parse.quote(row[0][0])}"
+/source/{self._model.config.machine}/spyder-console?ids={urllib.parse.quote(str(row[0][0]))}"
 
         # try to open the url in the browser and copy it to the clipboard
         browser_label = "URL not opened in browser"
@@ -774,7 +774,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         ):
             # remove any tree characters
             if isinstance(value, ColouredText):
-                value = value.raw_text
+                value = str(value.raw_text)  # type: ignore
             value = value.strip()
             if name == "Command":
                 value = re.sub(r"^(│  |   )*[├└][─+] ", "", value)

@@ -74,7 +74,7 @@ class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self.model = model
 
         self.cache, self.set_cache = model.use_state(
-            self._name,
+            str(self._name),
             {
                 "has_account": None,  # Optional[bool]
                 "orgs": None,  # Optional[List]
@@ -398,7 +398,7 @@ Once you have a source configured, you can continue.\
                     except ValueError:
                         index = 0
 
-                def back():
+                def back_handler():
                     self.config.org_confirmed = False
                     self.config.source_confirmed = False
                     self._on_submit = None
@@ -408,6 +408,8 @@ Once you have a source configured, you can continue.\
                 # the user is in only one org
                 if self.cache["orgs"] and len(self.cache["orgs"]) == 1:
                     back = None
+                else:
+                    back = back_handler
 
                 self.build_question(
                     "Please select a machine",
@@ -430,18 +432,12 @@ Once you have a source configured, you can continue.\
             # just use the currently available time
             if self.cache["looking_for_sources"]:
                 try:
-                    self.config.start_time = (
-                        datetime.strptime(
-                            self.cache["sources"][0]["last_stored_chunk_end_time"],
-                            "%Y-%m-%dT%H:%M:%SZ",
-                        )
-                        .replace(tzinfo=timezone.utc)
-                        .timestamp()
-                    )
+                    self.config.start_time = datetime.strptime(
+                        self.cache["sources"][0]["last_stored_chunk_end_time"],
+                        "%Y-%m-%dT%H:%M:%SZ",
+                    ).replace(tzinfo=timezone.utc)
                 except ValueError:
-                    self.config.start_time = (
-                        datetime.now() - timedelta(0, 30)
-                    ).timestamp()
+                    self.config.start_time = datetime.now() - timedelta(0, 30)
                 self._needs_build = True
                 self._screen.force_update()
                 return
@@ -483,6 +479,8 @@ Once you have a source configured, you can continue.\
         text_input = None
 
         def on_search():
+            if text_input is None:
+                return
             new_options = [
                 (line[0], i)
                 for i, line in enumerate(answers)
@@ -586,7 +584,7 @@ clicking on 'Create API Key'.\
                 lambda: """\
 Please select a start time. This can also be passed as a command line argument; \
 see the help page for more information.\
-                """,
+""",
                 align="<",
             ),
             1,
@@ -712,7 +710,7 @@ see the help page for more information.\
             Button(
                 "Continue",
                 lambda: self.set_start_time(
-                    date.value, time.value, selected_duration, time_zone
+                    date.value, time.value, selected_duration, time_zone  # type: ignore
                 ),
             ),
             1,
@@ -735,7 +733,7 @@ again the next time you start Spydertop, and will skip this configuration menu.
 
 These are default values, and can be overridden by passing them as command line \
 arguments (except for the API Key).\
-                """,
+""",
                 align="<",
             ),
             1,
@@ -820,7 +818,7 @@ arguments (except for the API Key).\
         self.set_cache(needs_saving=False)
         self.trigger_build()
 
-    def format_source(self, source: Source) -> str:
+    def format_source(self, source: Source) -> List[str]:
         """Format a source for display"""
         try:
             last_stored_time = (
@@ -871,7 +869,9 @@ arguments (except for the API Key).\
         time_zone: Union[timezone, tzinfo, None],
     ) -> None:
         """Set the start time"""
-        self.config.start_time = datetime.combine(date, time).replace(tzinfo=time_zone)
+        self.config.start_time = datetime.combine(date, time.time()).replace(
+            tzinfo=time_zone
+        )
         self.config.start_duration = duration
         self.trigger_build()
 

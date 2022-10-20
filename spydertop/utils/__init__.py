@@ -99,7 +99,7 @@ def header_bytes(n_bytes: int) -> str:
     return f"{n_bytes}P"
 
 
-def add_palette(text, model, **kwargs) -> Callable[[], str]:
+def add_palette(text, model, **kwargs) -> str:
     """formats the text with a few keys from the palette"""
     palette = THEMES[model.config["theme"]]
     # this is necessary because the palette may be a defaultdict

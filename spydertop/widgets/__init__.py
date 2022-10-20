@@ -11,7 +11,7 @@ bar graphs and dynamic labels.
 """
 
 import re
-from typing import Callable
+from typing import Callable, Optional
 from asciimatics.widgets import Widget
 from asciimatics.parsers import Parser
 from asciimatics.strings import ColouredText
@@ -66,7 +66,7 @@ class FuncLabel(Widget):
     function at display time. It also supports parsing colors
     """
 
-    parser: Parser
+    parser: Optional[Parser]
     align: str
     generator: Callable[[], str]
     color: str
@@ -74,7 +74,7 @@ class FuncLabel(Widget):
 
     def __init__(
         self,
-        generator: lambda: str,
+        generator: Callable[[], str],
         align="<",
         parser=None,
         name=None,
@@ -118,6 +118,7 @@ class FuncLabel(Widget):
         return height
 
     def update(self, frame_no):
+        assert self._frame is not None
         (color, attr, background) = self._frame.palette[self.color]
         text = self.generator()
         wrapper = CustomTextWrapper(
@@ -155,7 +156,9 @@ class FuncLabel(Widget):
                     color,
                     attr,
                     background,
-                    colour_map=line.colour_map if hasattr(line, "colour_map") else None,
+                    colour_map=line.colour_map  # type: ignore
+                    if hasattr(line, "colour_map")
+                    else None,
                 )
                 offset += 1
 

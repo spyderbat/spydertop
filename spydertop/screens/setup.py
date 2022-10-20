@@ -219,7 +219,7 @@ class SetupFrame(Frame):
     _main_column: ListBox
     _second_column: ListBox
     _has_textbox: bool = False
-    _on_death: Callable
+    _on_death: Optional[Callable]
 
     def __init__(
         self, screen: Screen, model: AppModel, on_death: Optional[Callable] = None
@@ -263,20 +263,22 @@ class SetupFrame(Frame):
         self.rebuild()
 
     def process_event(self, event):
+        assert self.scene is not None
         if isinstance(event, KeyboardEvent):
             if (
                 event.key_code == Screen.KEY_ESCAPE
                 or event.key_code == Screen.KEY_F10
                 or (event.key_code in {ord("q"), ord("Q")} and not self._has_textbox)
             ):
-                self._scene.remove_effect(self)
+                self.scene.remove_effect(self)
                 if self._on_death is not None:
                     self._on_death()
         elif isinstance(event, MouseEvent):
             if is_event_in_widget(event, self) and (event.buttons != 0):
                 # when a click is outside the modal, close it
-                self._scene.remove_effect(self)
-                self._on_death()
+                self.scene.remove_effect(self)
+                if self._on_death is not None:
+                    self._on_death()
 
         super().process_event(event)
         if self._model.config.settings_changed:
@@ -364,16 +366,18 @@ class SetupFrame(Frame):
         self._layout.clear_widgets()
         self._layout.add_widget(self._main_column, 0)
 
+        selected_col = str(self._main_column.value)
+
         # second Column
         self._second_column.options = (
-            [(x, x) for x in OPTIONS[self._main_column.value].keys()]
-            if isinstance(OPTIONS[self._main_column.value], dict)
+            [(x, x) for x in OPTIONS[selected_col].keys()]
+            if isinstance(OPTIONS[selected_col], dict)
             else []
         )
         self._layout.add_widget(self._second_column, 1)
 
         # Main view
-        widgets = OPTIONS[self._main_column.value]
+        widgets = OPTIONS[selected_col]
         if isinstance(widgets, dict):
             widgets = widgets[self._second_column.value]
         for widget in widgets:

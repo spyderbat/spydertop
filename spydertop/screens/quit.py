@@ -29,7 +29,7 @@ class QuitFrame(Frame):
     _double_column = Layout([1, 1])
     _needs_update = True
     _state: Dict[str, Any]
-    _set_state = Callable
+    _set_state: Callable
 
     def __init__(self, screen: Screen, model: AppModel) -> None:
         # pylint: disable=line-too-long
@@ -66,7 +66,7 @@ class QuitFrame(Frame):
             and self._state["enjoyed_spydertop"] is None
         ) or not os.path.exists(
             os.path.join(
-                os.environ.get("HOME"), ".spyderbat-api/.spydertop-settings.yaml"
+                os.environ.get("HOME"), ".spyderbat-api/.spydertop-settings.yaml"  # type: ignore
             )
         ):
             raise StopApplication("User Quit and does not need feedback")

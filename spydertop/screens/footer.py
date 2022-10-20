@@ -21,7 +21,7 @@ class Footer(Layout):
 
     _buttons: List = []
     _on_clicks: List = []
-    _end_widget: Widget = None
+    _end_widget: Widget
     _frame: Frame
     _widths: List[int]
 

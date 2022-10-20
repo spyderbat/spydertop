@@ -139,14 +139,13 @@ class LoadingFrame(Frame):
         self.set_theme(self._model.config["theme"])
 
         # see if the model is done
-        if self._model.failed:
-            self._model.thread.join()
-            raise NextScene("Failure")
-        if self._model.loaded:
-            self._model.thread.join()
-            self._quit()
-        else:
-            pass
+        if self._model.thread is not None:
+            if self._model.failed:
+                self._model.thread.join()
+                raise NextScene("Failure")
+            if self._model.loaded:
+                self._model.thread.join()
+                self._quit()
         super().update(frame_no)
 
     def process_event(self, event):

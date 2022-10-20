@@ -34,7 +34,7 @@ class CursorList(Generic[CT]):
     data: List[Dict]
     key: str
     index: int = -1
-    cursor: CT = None
+    cursor: Optional[CT] = None
 
     def __init__(self, key: str, data: List[Dict], cursor: CT):
         self.key = key
@@ -43,8 +43,6 @@ class CursorList(Generic[CT]):
             self.cursor = cursor
         if len(self.data) == 0:
             return
-        if key not in self.data.columns:
-            raise ValueError(f'Key "{key}" is not a valid key for data.')
         self._update_data()
 
     def extend(self, new_data: List[Dict]):
