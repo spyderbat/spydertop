@@ -340,14 +340,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
                 for (i, cpu) in enumerate(self._cpus):
                     values = update_cpu(i, self._model)
                     cpu.value = values
-                (total, values) = update_memory(self._model)
-                if total is not None and values is not None:
-                    self._memory.total = total
-                    self._memory.value = values
-                (total, values) = update_swap(self._model)
-                if total is not None and values is not None:
-                    self._swap.total = total
-                    self._swap.value = values
+                (self._memory.total, self._memory.value) = update_memory(self._model)
+                (self._swap.total, self._swap.value) = update_swap(self._model)
 
                 self.needs_screen_refresh = False
                 # time screen update

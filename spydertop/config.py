@@ -28,12 +28,12 @@ from spydertop.constants.columns import (
 from spydertop.utils import log
 
 
-def dump_columns(columns) -> Dict[str, bool]:
+def dump_columns(columns: List[Column]) -> Dict[str, bool]:
     """
     Dumps the columns to a dictionary, where the key is the column
     name and the value is whether or not the column is enabled
     """
-    return {column[0]: column[5] for column in columns}
+    return {column.header_name: column.enabled for column in columns}
 
 
 class Config:  # pylint: disable=too-many-instance-attributes

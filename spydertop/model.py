@@ -137,7 +137,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
         datatype: str,
     ) -> bytes:
         """Load data from the API with a specified type"""
-        log.debug({"org_uid": self.config.org, "dt": "spydergraph", **input_data})
+        log.debug({"org_uid": self.config.org, "dt": datatype, **input_data})
         try:
             api_response: urllib3.HTTPResponse = api_instance.src_data_query_v2(
                 org_uid=self.config.org,
@@ -213,8 +213,6 @@ Is the url {self.config.input} correct?"
             self._time_span_tracker.add_time_span(
                 input_data["st"] + 30, input_data["et"]
             )
-
-            log.log(self._time_span_tracker.times)
 
             lines += self.load_from_api(api_instance, input_data, "spydergraph").split(
                 b"\n"

@@ -167,7 +167,7 @@ class DelayedLog:
 
     def __init__(self):
         # require log_level to be set before logging
-        pass
+        logging.addLevelName(self.TRACEBACK, "TRACEBACK")
 
     def initialize_development_logging(self):
         """Initialize logging for development purposes, saving to a file."""

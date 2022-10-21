@@ -15,7 +15,7 @@ import fnmatch
 import re
 from time import sleep
 from threading import Thread
-from datetime import datetime, timedelta, timezone, tzinfo
+from datetime import datetime, time, timedelta, timezone, tzinfo
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 import yaml
@@ -596,7 +596,7 @@ see the help page for more information.\
         time_zone = get_timezone(self.model)
 
         def on_change():
-            selected_time = datetime.combine(date.value, time.value).replace(
+            selected_time = datetime.combine(date.value, time_widget.value).replace(
                 tzinfo=time_zone
             )
             # remove the color from the time label
@@ -610,10 +610,10 @@ see the help page for more information.\
             on_change=on_change,
         )
         self.layout.add_widget(date, 1)
-        time = TimePicker(label="Time:", seconds=True, on_change=on_change)
+        time_widget = TimePicker(label="Time:", seconds=True, on_change=on_change)
 
         self.layout.add_widget(Padding(), 1)
-        self.layout.add_widget(time, 1)
+        self.layout.add_widget(time_widget, 1)
 
         default_time = datetime.now(timezone.utc) - timedelta(minutes=15)
 
@@ -630,7 +630,7 @@ see the help page for more information.\
 
             def button_callback():
                 date.value = source_time_local
-                time.value = source_time_local.time()
+                time_widget.value = source_time_local.time()
                 warning_label.text = (
                     "Warning: the create time may not have complete data"
                 )
@@ -661,7 +661,7 @@ see the help page for more information.\
 
                 def last_seen_button_callback():
                     date.value = last_seen_time_local
-                    time.value = last_seen_time_local.time()
+                    time_widget.value = last_seen_time_local.time()
                     on_change()
 
                 last_seen_button = Button(
@@ -674,7 +674,7 @@ see the help page for more information.\
 
         default_time_local = default_time.astimezone(time_zone)
         date.value = default_time_local
-        time.value = default_time_local.time()
+        time_widget.value = default_time_local.time()
 
         # duration selector
         self.layout.add_widget(Padding(), 1)
@@ -710,7 +710,7 @@ see the help page for more information.\
             Button(
                 "Continue",
                 lambda: self.set_start_time(
-                    date.value, time.value, selected_duration, time_zone  # type: ignore
+                    date.value, time_widget.value, selected_duration, time_zone  # type: ignore
                 ),
             ),
             1,
@@ -864,12 +864,12 @@ arguments (except for the API Key).\
     def set_start_time(
         self,
         date: datetime,
-        time: datetime,
+        time_portion: time,
         duration: timedelta,
         time_zone: Union[timezone, tzinfo, None],
     ) -> None:
         """Set the start time"""
-        self.config.start_time = datetime.combine(date, time.time()).replace(
+        self.config.start_time = datetime.combine(date, time_portion).replace(
             tzinfo=time_zone
         )
         self.config.start_duration = duration

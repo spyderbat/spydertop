@@ -25,6 +25,8 @@ class Meter(Widget):
     theme.
     """
 
+    total: Optional[float]
+
     def __init__(  # pylint: disable=too-many-arguments
         self,
         label: str,
@@ -111,7 +113,7 @@ class Meter(Widget):
             else self._frame.palette["background"]
         )
         # early exit if values is empty
-        if not self._values:
+        if not self._values or not self.total:
             end_label = "No data"
             self._frame.canvas.paint(
                 end_label,

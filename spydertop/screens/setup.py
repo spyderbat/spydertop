@@ -35,6 +35,7 @@ from asciimatics.widgets import (
 from asciimatics.event import KeyboardEvent, MouseEvent
 
 from spydertop.constants.columns import (
+    CONTAINER_COLUMNS,
     PROCESS_COLUMNS,
     FLAG_COLUMNS,
     SESSION_COLUMNS,
@@ -79,9 +80,9 @@ def set_config(name):
     return inner
 
 
-def get_enabled(columns, index):
+def get_enabled(columns: List[Column], index: int):
     """Get the enabled status of a column"""
-    return lambda _: columns[index][5]
+    return lambda _: columns[index].enabled
 
 
 def collapse_tree(val, model):
@@ -101,43 +102,51 @@ OPTIONS = {
     "Columns": {
         "Processes": [
             (
-                col[0],
-                (col[5], get_enabled(PROCESS_COLUMNS, i)),
-                change_columns(PROCESS_COLUMNS, col[0]),
+                col.header_name,
+                (col.enabled, get_enabled(PROCESS_COLUMNS, i)),
+                change_columns(PROCESS_COLUMNS, col.header_name),
             )
             for i, col in enumerate(PROCESS_COLUMNS)
         ],
         "Flags": [
             (
-                col[0],
-                (col[5], get_enabled(FLAG_COLUMNS, i)),
-                change_columns(FLAG_COLUMNS, col[0]),
+                col.header_name,
+                (col.enabled, get_enabled(FLAG_COLUMNS, i)),
+                change_columns(FLAG_COLUMNS, col.header_name),
             )
             for i, col in enumerate(FLAG_COLUMNS)
         ],
         "Sessions": [
             (
-                col[0],
-                (col[5], get_enabled(SESSION_COLUMNS, i)),
-                change_columns(SESSION_COLUMNS, col[0]),
+                col.header_name,
+                (col.enabled, get_enabled(SESSION_COLUMNS, i)),
+                change_columns(SESSION_COLUMNS, col.header_name),
             )
             for i, col in enumerate(SESSION_COLUMNS)
         ],
         "Connections": [
             (
-                col[0],
-                (col[5], get_enabled(CONNECTION_COLUMNS, i)),
-                change_columns(CONNECTION_COLUMNS, col[0]),
+                col.header_name,
+                (col.enabled, get_enabled(CONNECTION_COLUMNS, i)),
+                change_columns(CONNECTION_COLUMNS, col.header_name),
             )
             for i, col in enumerate(CONNECTION_COLUMNS)
         ],
         "Listening": [
             (
-                col[0],
-                (col[5], get_enabled(LISTENING_SOCKET_COLUMNS, i)),
-                change_columns(LISTENING_SOCKET_COLUMNS, col[0]),
+                col.header_name,
+                (col.enabled, get_enabled(LISTENING_SOCKET_COLUMNS, i)),
+                change_columns(LISTENING_SOCKET_COLUMNS, col.header_name),
             )
             for i, col in enumerate(LISTENING_SOCKET_COLUMNS)
+        ],
+        "Containers": [
+            (
+                col.header_name,
+                (col.enabled, get_enabled(CONTAINER_COLUMNS, i)),
+                change_columns(CONTAINER_COLUMNS, col.header_name),
+            )
+            for i, col in enumerate(CONTAINER_COLUMNS)
         ],
     },
     # there is currently no mechanism to enable/disable meters

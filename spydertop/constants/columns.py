@@ -74,23 +74,12 @@ class Column:
                 lambda m, r: datetime.fromtimestamp(
                     float(r[str_field]), timezone.utc
                 ).astimezone(get_timezone(m))
-                if field in r
+                if str_field in r
                 else None
             )
         else:
             self.value_getter = value_getter or (lambda m, r: value_type(r[str_field]))
         self.value_formatter = value_formatter or (lambda m, r, v: str(v))
-
-    def __getitem__(self, key: int) -> Any:
-        attr_map = [
-            "header_name",
-            "value_formatter",
-            "align",
-            "max_width",
-            "value_getter",
-            "enabled",
-        ]
-        return getattr(self, attr_map[key])
 
     def get_value(self, model: AppModel, record: Record) -> Any:
         """Returns the value for the column"""
