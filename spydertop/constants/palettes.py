@@ -31,7 +31,7 @@ HTOP_PALETTE = {
     "readonly": (Screen.COLOUR_DEFAULT, Screen.A_NORMAL, Screen.COLOUR_DEFAULT),
     "scroll": (Screen.COLOUR_DEFAULT, Screen.A_NORMAL, Screen.COLOUR_DEFAULT),
     "selected_control": (Screen.COLOUR_DEFAULT, Screen.A_BOLD, Screen.COLOUR_GREEN),
-    "selected_field": (Screen.COLOUR_BLACK, Screen.A_NORMAL, Screen.COLOUR_WHITE),
+    "selected_field": (Screen.COLOUR_CYAN, Screen.A_BOLD, Screen.COLOUR_DEFAULT),
     "selected_focus_control": (
         Screen.COLOUR_BLACK,
         Screen.A_NORMAL,

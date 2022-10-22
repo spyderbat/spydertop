@@ -175,6 +175,7 @@ Please make sure you entered it correctly.",
                 self.build_config_save()
                 return
             log.info("Config is complete, starting load")
+            log.info(self.config)
             self.model.init()
             raise NextScene("Loading")
 

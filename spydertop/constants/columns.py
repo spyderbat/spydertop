@@ -335,13 +335,23 @@ PROCESS_COLUMNS = [
         enabled=False,
     ),
     Column("CGROUP", 20, str, enabled=False),
-    Column("CONTAINER", 10, str, enabled=False),
     Column(
-        "CONTAINER_DETAILS",
+        "CONTAINER_SHORT_ID",
         20,
         str,
-        value_getter=lambda m, x: x.get("container", None),
-        value_formatter=format_container,
+        value_getter=lambda m, x: map_optional(
+            lambda x: m.containers.get(x, {}).get("container_short_id"),
+            x.get("container"),
+        ),
+        enabled=False,
+    ),
+    Column(
+        "CONTAINER_IMAGE",
+        10,
+        str,
+        value_getter=lambda m, x: map_optional(
+            lambda x: m.containers.get(x, {}).get("image"), x.get("container")
+        ),
         enabled=False,
     ),
     Column(
@@ -387,7 +397,7 @@ SESSION_COLUMNS = [
     Column("START_TIME", 27, datetime, align=Alignment.RIGHT, field="valid_from"),
     Column(
         "DURATION",
-        9,
+        10,
         timedelta,
         align=Alignment.RIGHT,
         value_getter=lambda m, s: timedelta(seconds=m.timestamp - s["valid_from"])
@@ -418,7 +428,7 @@ CONNECTION_COLUMNS = [
     Column("END_TIME", 27, datetime, field="valid_to", enabled=False),
     Column(
         "DURATION",
-        9,
+        10,
         timedelta,
         value_getter=lambda m, c: timedelta(seconds=m.timestamp - c["valid_from"])
         if "duration" not in c or "valid_to" not in c or c["valid_to"] > m.timestamp
@@ -496,7 +506,7 @@ FLAG_COLUMNS = [
     Column("TIME", 27, datetime),
     Column(
         "AGE",
-        9,
+        10,
         timedelta,
         align=Alignment.RIGHT,
         value_getter=lambda m, f: timedelta(seconds=m.timestamp - f["time"]),
@@ -547,7 +557,7 @@ LISTENING_SOCKET_COLUMNS = [
     Column("START_TIME", 27, datetime, field="valid_from", enabled=False),
     Column(
         "DURATION",
-        9,
+        10,
         timedelta,
         value_getter=lambda m, l: timedelta(
             seconds=l.get("duration", m.timestamp - l["valid_from"])
@@ -578,27 +588,73 @@ def get_system(model: AppModel, cont: Record) -> Optional[str]:
     return None
 
 
+def format_mounts(_m: AppModel, _c: Record, mounts: List[Record]) -> str:
+    """Format the mounts for a container."""
+    return "\n".join(
+        f"{m['Source']}:{m['Destination']}"
+        for m in sorted(mounts, key=lambda m: m["Destination"])
+    )
+
+
+def format_networks(_m: AppModel, _c: Record, networks: dict) -> str:
+    """Format the networks for a container."""
+    return "\n".join(
+        f"{key}: {json.dumps(value)}" for key, value in networks.items() if value
+    )
+
+
 CONTAINER_COLUMNS = [
     Column("ID", 42, str, enabled=False),
-    Column("START_TIME", 27, datetime, field="valid_from", enabled=False),
-    Column(
-        "AGE",
-        9,
-        timedelta,
-        value_getter=lambda m, c: timedelta(seconds=m.timestamp - c["valid_from"])
-        if "duration" not in c or "valid_to" not in c or c["valid_to"] > m.timestamp
-        else timedelta(seconds=c["duration"]),
-        value_formatter=lambda m, c, x: pretty_time(x.total_seconds()),
-    ),
-    Column("IMAGE", 12, str),
+    Column("CONTAINER_ID", 12, str, field="container_short_id"),
+    Column("CONT_ID_FULL", 10, str, field="container_id", enabled=False),
+    Column("IMAGE", 40, str),
     Column("IMAGE_ID", 10, str, enabled=False),
-    Column("SYSTEM", 15, str, value_getter=get_system),
     Column(
-        "PATH",
-        15,
+        "COMMAND",
+        25,
         str,
         value_formatter=lambda m, c, x: x if x != "/pause" else "${8,1}/pause",
     ),
-    Column("CONT_ID", 10, str, field="container_id"),
+    Column(
+        "CREATED",
+        15,
+        datetime,
+        value_formatter=lambda m, c, x: pretty_time((m.time - x).total_seconds())
+        + " ago",
+    ),
+    Column("START_TIME", 27, datetime, field="valid_from", enabled=False),
+    Column(
+        "PORTS",
+        12,
+        list,
+        field="port_bindings",
+        value_formatter=lambda m, c, x: ", ".join(x),
+    ),
+    Column(
+        "VOLUMES",
+        11,
+        list,
+        field="mounts",
+        value_formatter=format_mounts,
+        enabled=False,
+    ),
+    Column(
+        "ENVIRONMENT",
+        11,
+        dict,
+        field="env",
+        value_formatter=format_environ,
+        enabled=False,
+    ),
+    Column("NETWORKS", 11, dict, value_formatter=format_networks, enabled=False),
+    Column("SYSTEM", 15, str, value_getter=get_system, enabled=False),
+    Column(
+        "ENTRYPOINT",
+        15,
+        str,
+        value_getter=lambda m, c: " ".join(c.get("entrypoint") or []),
+        value_formatter=lambda m, c, x: x if x != "/pause" else "${8,1}/pause",
+        enabled=False,
+    ),
     Column("NAME", 0, str, field="container_name"),
 ]

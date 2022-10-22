@@ -34,19 +34,22 @@ def map_optional(func: Callable[[T], U], value: Optional[T]) -> Optional[U]:
 
 def pretty_time(time: float) -> str:
     """Format a time in a human readable format, similar to the format used in htop"""
+    centiseconds = int(time * 100) % 100
     seconds = int(time) % 60
     minutes = int(time / 60) % 60
-    hours = int(time / 3600)
-    centiseconds = int(time * 100) % 100
-    if hours == 0:
-        if time < 0.1:
-            milliseconds = int(time * 1_000)
-            if milliseconds == 0:
-                microseconds = int(time * 1_000_000)
-                return f"{microseconds}μs"
-            return f"{milliseconds}ms"
-        return f"{minutes}:{seconds:02d}.{centiseconds:02d}"
-    return f"${{6}}{hours}h${{7}}{minutes:02d}:{seconds:02d}"
+    hours = int(time / 3600) % 24
+    days = int(time / 86400)
+    if days == 0:
+        if hours == 0:
+            if time < 0.1:
+                milliseconds = int(time * 1_000)
+                if milliseconds == 0:
+                    microseconds = int(time * 1_000_000)
+                    return f"{microseconds}μs"
+                return f"{milliseconds}ms"
+            return f"{minutes}:{seconds:02d}.{centiseconds:02d}"
+        return f"${{6}}{hours}h${{7}}{minutes:02d}:{seconds:02d}"
+    return f"${{2}}{days}d${{6}}{hours:02d}${{7}}:{minutes:02d}:{seconds:02d}"
 
 
 def pretty_datetime(  # pylint: disable=too-many-return-statements

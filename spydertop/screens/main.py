@@ -605,8 +605,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
         if tab_name == "containers":
             self._current_columns = CONTAINER_COLUMNS
-            self._model.config["sort_column"] = "AGE"
-            self._model.config["sort_ascending"] = True
+            self._model.config["sort_column"] = "CREATED"
+            self._model.config["sort_ascending"] = False
 
     def _show_sort_menu(self):
         """show the sort menu"""

@@ -31,7 +31,7 @@ from spydertop.constants import API_LOG_TYPES
 
 def start_screen(config: Config) -> None:
     """Initializes and manages the asciimatics screen"""
-    log.info(config)
+    log.debug("Initial config:\n", config)
 
     last_scene = None
     model = AppModel(config)

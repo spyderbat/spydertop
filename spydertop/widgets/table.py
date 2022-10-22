@@ -480,6 +480,9 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
 
         index = col_names.index(key)
 
+        if self.columns[index].value_type is dict:
+            return rows
+
         def key_func(val):
             return val[1][index]
 

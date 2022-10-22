@@ -19,6 +19,7 @@ import click
 
 from spydertop.constants.columns import (
     CONNECTION_COLUMNS,
+    CONTAINER_COLUMNS,
     FLAG_COLUMNS,
     LISTENING_SOCKET_COLUMNS,
     PROCESS_COLUMNS,
@@ -74,7 +75,7 @@ class Config:  # pylint: disable=too-many-instance-attributes
     }
     settings_changed: bool = False
 
-    def __init__(  # pylint: disable=too-many-arguments,too-many-statements
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         org: Optional[str],
         source: Optional[str],
@@ -94,6 +95,13 @@ class Config:  # pylint: disable=too-many-instance-attributes
         else:
             log.log_level = logging.getLevelName(log_level)
 
+        if isinstance(log.log_level, str):
+            log.log_level = logging.WARN
+            log.warn(
+                "Invalid log level specified, defaulting to WARN. \
+See --help for a list of valid log levels."
+            )
+
         try:
             config_default = self._load_config()
             self.has_config_file = True
@@ -111,31 +119,7 @@ class Config:  # pylint: disable=too-many-instance-attributes
         # open the cached settings file if it exists, but fail quietly
         # as the user does not need to know about this
         try:
-            with open(
-                os.path.join(
-                    os.environ.get("HOME"),  # type: ignore
-                    ".spyderbat-api/.spydertop-settings.yaml",  # type: ignore
-                ),
-                encoding="utf-8",
-            ) as file:
-                settings_file = yaml.safe_load(file)
-            # load all the column enabled settings
-            for key in settings_file["settings"]:
-                if key in self.settings:
-                    self.settings[key] = settings_file["settings"][key]
-
-            def load_enabled(name: str, columns: List[Column]):
-                if name in settings_file:
-                    for key in settings_file[name]:
-                        names = [row.header_name for row in columns]
-                        if key in names:
-                            columns[names.index(key)].enabled = settings_file[name][key]
-
-            load_enabled("processes", PROCESS_COLUMNS)
-            load_enabled("connections", CONNECTION_COLUMNS)
-            load_enabled("listening_sockets", LISTENING_SOCKET_COLUMNS)
-            load_enabled("sessions", SESSION_COLUMNS)
-            load_enabled("flags", FLAG_COLUMNS)
+            self._load_cached_settings()
         except Exception as exc:  # pylint: disable=broad-except
             log.info("Failed to load cached settings: " + str(exc))
 
@@ -191,6 +175,35 @@ Section default does not contain {exc.args[0]}, and it was not specified as a co
 
         return file_config["default"]
 
+    def _load_cached_settings(self) -> None:
+        """Loads the cached settings file at $HOME/.spyderbat-api/.spydertop-settings.yaml"""
+        with open(
+            os.path.join(
+                os.environ.get("HOME"),  # type: ignore
+                ".spyderbat-api/.spydertop-settings.yaml",  # type: ignore
+            ),
+            encoding="utf-8",
+        ) as file:
+            settings_file = yaml.safe_load(file)
+        # load all the column enabled settings
+        for key in settings_file["settings"]:
+            if key in self.settings:
+                self.settings[key] = settings_file["settings"][key]
+
+        def load_enabled(name: str, columns: List[Column]):
+            if name in settings_file:
+                for key in settings_file[name]:
+                    names = [row.header_name for row in columns]
+                    if key in names:
+                        columns[names.index(key)].enabled = settings_file[name][key]
+
+        load_enabled("processes", PROCESS_COLUMNS)
+        load_enabled("connections", CONNECTION_COLUMNS)
+        load_enabled("listening_sockets", LISTENING_SOCKET_COLUMNS)
+        load_enabled("sessions", SESSION_COLUMNS)
+        load_enabled("flags", FLAG_COLUMNS)
+        load_enabled("containers", CONTAINER_COLUMNS)
+
     def dump(self) -> None:
         """Saves the settings in a persistent configuration file"""
         config_dir = os.path.join(
@@ -217,6 +230,7 @@ Section default does not contain {exc.args[0]}, and it was not specified as a co
                     "flags": dump_columns(FLAG_COLUMNS),
                     "connections": dump_columns(CONNECTION_COLUMNS),
                     "listening": dump_columns(LISTENING_SOCKET_COLUMNS),
+                    "containers": dump_columns(CONTAINER_COLUMNS),
                 },
                 file,
             )

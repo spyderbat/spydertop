@@ -177,7 +177,7 @@ fetching records from the production Spyderbat API",
     "--log-level",
     type=str,
     default="WARN",
-    help="What level of verbosity in logs, one of DEBUG, INFO, WARN, ERROR. If a + is \
+    help="What level of verbosity in logs, one of TRACEBACK, DEBUG, INFO, WARN, ERROR. If a + is \
 appended to the log level, extended logging and saving to a file will be enabled. \
 Defaults to WARN",
     envvar="SPYDERTOP_LOG_LEVEL",

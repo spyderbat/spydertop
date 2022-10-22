@@ -55,7 +55,15 @@ class FailureFrame(Frame):
                 parser=ExtendedParser(),
             )
         )
-        layout.add_widget(FuncLabel(lambda: model.failure_reason, align="^"))
+        layout.add_widget(Padding(1))
+        layout.add_widget(
+            FuncLabel(
+                lambda: f"${{1,1}}{model.failure_reason}",
+                align="^",
+                parser=ExtendedParser(),
+            )
+        )
+        layout.add_widget(Padding(1))
         layout.add_widget(
             FuncLabel(
                 lambda: "What do you want to do?",
