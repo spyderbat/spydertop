@@ -336,8 +336,8 @@ PROCESS_COLUMNS = [
     ),
     Column("CGROUP", 20, str, enabled=False),
     Column(
-        "CONTAINER_SHORT_ID",
-        20,
+        "CONT_SHORT_ID",
+        12,
         str,
         value_getter=lambda m, x: map_optional(
             lambda x: m.containers.get(x, {}).get("container_short_id"),
@@ -347,7 +347,7 @@ PROCESS_COLUMNS = [
     ),
     Column(
         "CONTAINER_IMAGE",
-        10,
+        15,
         str,
         value_getter=lambda m, x: map_optional(
             lambda x: m.containers.get(x, {}).get("image"), x.get("container")
@@ -623,6 +623,18 @@ CONTAINER_COLUMNS = [
         + " ago",
     ),
     Column("START_TIME", 27, datetime, field="valid_from", enabled=False),
+    Column(
+        "STATUS",
+        15,
+        datetime,
+        value_getter=lambda m, c: map_optional(
+            lambda x: datetime.fromtimestamp(x, timezone.utc).astimezone(
+                get_timezone(m)
+            ),
+            c.get("container_detail_state", {}).get("StartedAt"),
+        ),
+        value_formatter=lambda m, c, x: f"Up {pretty_time((m.time - x).total_seconds())}",
+    ),
     Column(
         "PORTS",
         12,

@@ -242,7 +242,7 @@ repository) like so:
                 return
 
             # if there are orgs, determine how many, and pick one
-            if self.cache["orgs"]:
+            if self.cache["orgs"] is not None:
                 if len(self.cache["orgs"]) == 0:
                     self.build_error(
                         """\

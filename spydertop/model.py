@@ -423,8 +423,15 @@ not enough information could be loaded.\
             self.fail(f"Exception when calling OrgApi: {exc.status} - {exc.reason}")
             log.traceback(exc)
             return None
+        except MaxRetryError as exc:
+            self.fail(
+                f"There was an issue trying to connect to the API. \
+Is the url {self.config.input} correct?"
+            )
+            log.traceback(exc)
+            return None
         except Exception as exc:  # pylint: disable=broad-except
-            self.fail("Exception when calling OrgApi.")
+            self.fail("An unknown error occurred when calling OrgApi: {exc}")
             log.traceback(exc)
             return None
 
@@ -461,6 +468,13 @@ not enough information could be loaded.\
             self.log_api(API_LOG_TYPES["sources"], {"count": len(sources)})
 
             return sources
+        except MaxRetryError as exc:
+            self.fail(
+                f"There was an issue trying to connect to the API. \
+Is the url {self.config.input} correct?"
+            )
+            log.traceback(exc)
+            return None
         except Exception as exc:  # pylint: disable=broad-except
             self.fail(f"Exception when calling SourceApi: {exc}")
             log.traceback(exc)
