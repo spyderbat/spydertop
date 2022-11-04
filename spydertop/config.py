@@ -11,28 +11,30 @@ Configuration object and associated functions
 
 import logging
 import os
-from typing import Any, Dict, Optional, TextIO, Union
+from typing import Any, Dict, List, Optional, TextIO, Union
 from datetime import datetime, timedelta
 
 import yaml
 import click
 
-from spydertop.columns import (
+from spydertop.constants.columns import (
     CONNECTION_COLUMNS,
+    CONTAINER_COLUMNS,
     FLAG_COLUMNS,
     LISTENING_SOCKET_COLUMNS,
     PROCESS_COLUMNS,
     SESSION_COLUMNS,
+    Column,
 )
 from spydertop.utils import log
 
 
-def dump_columns(columns) -> Dict[str, bool]:
+def dump_columns(columns: List[Column]) -> Dict[str, bool]:
     """
     Dumps the columns to a dictionary, where the key is the column
     name and the value is whether or not the column is enabled
     """
-    return {column[0]: column[5] for column in columns}
+    return {column.header_name: column.enabled for column in columns}
 
 
 class Config:  # pylint: disable=too-many-instance-attributes
@@ -73,7 +75,7 @@ class Config:  # pylint: disable=too-many-instance-attributes
     }
     settings_changed: bool = False
 
-    def __init__(  # pylint: disable=too-many-arguments,too-many-statements
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         org: Optional[str],
         source: Optional[str],
@@ -93,6 +95,13 @@ class Config:  # pylint: disable=too-many-instance-attributes
         else:
             log.log_level = logging.getLevelName(log_level)
 
+        if isinstance(log.log_level, str):
+            log.log_level = logging.WARN
+            log.warn(
+                "Invalid log level specified, defaulting to WARN. \
+See --help for a list of valid log levels."
+            )
+
         try:
             config_default = self._load_config()
             self.has_config_file = True
@@ -110,38 +119,7 @@ class Config:  # pylint: disable=too-many-instance-attributes
         # open the cached settings file if it exists, but fail quietly
         # as the user does not need to know about this
         try:
-            with open(
-                os.path.join(
-                    os.environ.get("HOME"), ".spyderbat-api/.spydertop-settings.yaml"
-                ),
-                encoding="utf-8",
-            ) as file:
-                settings_file = yaml.safe_load(file)
-            # load all the column enabled settings
-            for key in settings_file["settings"]:
-                if key in self.settings:
-                    self.settings[key] = settings_file["settings"][key]
-
-            def load_enabled(name, columns):
-                if name in settings_file:
-                    for key in settings_file[name]:
-                        names = [row[0] for row in columns]
-                        if key in names:
-                            col = columns[names.index(key)]
-                            columns[names.index(key)] = (
-                                col[0],
-                                col[1],
-                                col[2],
-                                col[3],
-                                col[4],
-                                settings_file[name][key],
-                            )
-
-            load_enabled("processes", PROCESS_COLUMNS)
-            load_enabled("connections", CONNECTION_COLUMNS)
-            load_enabled("listening_sockets", LISTENING_SOCKET_COLUMNS)
-            load_enabled("sessions", SESSION_COLUMNS)
-            load_enabled("flags", FLAG_COLUMNS)
+            self._load_cached_settings()
         except Exception as exc:  # pylint: disable=broad-except
             log.info("Failed to load cached settings: " + str(exc))
 
@@ -188,16 +166,49 @@ Section default does not contain {exc.args[0]}, and it was not specified as a co
     def _load_config() -> Dict[str, Any]:
         """Loads the configuration file at $HOME/.spyderbat-api/config.yaml"""
         home = os.environ.get("HOME")
-        config_file_loc = os.path.join(home, ".spyderbat-api/config.yaml")
+        config_file_loc = os.path.join(
+            home, ".spyderbat-api/config.yaml"  # type: ignore
+        )
 
         with open(config_file_loc, encoding="utf-8") as file:
             file_config = yaml.safe_load(file)
 
         return file_config["default"]
 
+    def _load_cached_settings(self) -> None:
+        """Loads the cached settings file at $HOME/.spyderbat-api/.spydertop-settings.yaml"""
+        with open(
+            os.path.join(
+                os.environ.get("HOME"),  # type: ignore
+                ".spyderbat-api/.spydertop-settings.yaml",  # type: ignore
+            ),
+            encoding="utf-8",
+        ) as file:
+            settings_file = yaml.safe_load(file)
+        # load all the column enabled settings
+        for key in settings_file["settings"]:
+            if key in self.settings:
+                self.settings[key] = settings_file["settings"][key]
+
+        def load_enabled(name: str, columns: List[Column]):
+            if name in settings_file:
+                for key in settings_file[name]:
+                    names = [row.header_name for row in columns]
+                    if key in names:
+                        columns[names.index(key)].enabled = settings_file[name][key]
+
+        load_enabled("processes", PROCESS_COLUMNS)
+        load_enabled("connections", CONNECTION_COLUMNS)
+        load_enabled("listening_sockets", LISTENING_SOCKET_COLUMNS)
+        load_enabled("sessions", SESSION_COLUMNS)
+        load_enabled("flags", FLAG_COLUMNS)
+        load_enabled("containers", CONTAINER_COLUMNS)
+
     def dump(self) -> None:
         """Saves the settings in a persistent configuration file"""
-        config_dir = os.path.join(os.environ.get("HOME"), ".spyderbat-api/")
+        config_dir = os.path.join(
+            os.environ.get("HOME"), ".spyderbat-api/"  # type: ignore
+        )
 
         # ensure that the config directory exists
         if not os.path.exists(config_dir):
@@ -219,6 +230,7 @@ Section default does not contain {exc.args[0]}, and it was not specified as a co
                     "flags": dump_columns(FLAG_COLUMNS),
                     "connections": dump_columns(CONNECTION_COLUMNS),
                     "listening": dump_columns(LISTENING_SOCKET_COLUMNS),
+                    "containers": dump_columns(CONTAINER_COLUMNS),
                 },
                 file,
             )
@@ -247,7 +259,7 @@ config:
     input: {self.input}
     start_time: {self.start_time}
     start_duration: {self.start_duration}\
-        """
+"""
 
     def cleanup(self):
         """Perform cleanup of the associated data in the config"""
@@ -256,7 +268,7 @@ config:
         if self.input and not isinstance(self.input, str):
             self.input.close()
         # if the output is a gzip file, we need to close it manually
-        if hasattr(self.output, "close"):
+        if self.output is not None and hasattr(self.output, "close"):
             self.output.close()
 
     @property

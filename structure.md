@@ -61,7 +61,7 @@ While the 16-color palette is more widely supported, these colors are often cust
 - 7: white
 - 8-15: modified (darker/lighter) versions of the first 8, sometimes identical to the first 8
 
-Colors and styles are defined centrally in the theme palette, which is defined in [`utils.py`](spydertop/utils.py). This palette is only directly available to widgets, so most styling functions will use the coloring format directly (i.e. `"${2,1,7}Green bold text with a white background"`).
+Colors and styles are defined centrally in the theme palette, which is defined in [`palettes.py`](spydertop/constants/palettes.py). This palette is only directly available to widgets, so most styling functions will use the coloring format directly (i.e. `"${2,1,7}Green bold text with a white background"`).
 
 ## Spydertop's Objects
 
@@ -103,9 +103,9 @@ The `MainFrame` is responsible for handling user input and deciding how much of 
 
 #### Updating Columns
 
-When `needs_recalculate` triggers a recalculation of columns, `_build_options` is called. This will get the correct type of records from the model depending on the current tab, then create a set of column data which can be sorted and displayed. The columns are defined by a set of objects in [`columns.py`](spydertop/columns.py) containing metadata for displaying the columns as well as a pair of functions to calculate a sortable value and displayable value for that cell.
+When `needs_recalculate` triggers a recalculation of columns, `_build_options` is called. This will get the correct type of records from the model depending on the current tab, then create a set of column data which can be sorted and displayed. The columns are defined by a set of objects in [`columns.py`](spydertop/constants/columns.py) containing metadata for displaying the columns as well as a pair of functions to calculate a sortable value and displayable value for that cell.
 
-### [Table](spydertop/table.py)
+### [Table](spydertop/widgets/table.py)
 
 The `Table` object is responsible for displaying the records for the current tab in addition to sorting, filtering, and searching those records. It receives the calculated columns from the `MainFrame` and stores, sorts, then filters them. When displaying the records on screen, only the rows shown on the screen are rendered to improve responsiveness.
 

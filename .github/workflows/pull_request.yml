@@ -16,7 +16,7 @@ jobs:
         name: Checkout
         uses: actions/checkout@v3
       -  
-        name: Set up Python ${{ matrix.python-version }}
+        name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
@@ -39,3 +39,8 @@ jobs:
         if: matrix.python-version == '3.6'
         run: |
           pylint spydertop --disable=no-self-use
+      - 
+        name: Run Type Check
+        uses: jakebailey/pyright-action@v1
+        with:
+          python-version: ${{ matrix.python-version }}

@@ -22,7 +22,7 @@ contained in Spydertop.
 #         Everything in config.settings (that fits)
 #         Color scheme
 
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 from asciimatics.screen import Screen
 from asciimatics.widgets import (
     Frame,
@@ -34,12 +34,14 @@ from asciimatics.widgets import (
 )
 from asciimatics.event import KeyboardEvent, MouseEvent
 
-from spydertop.columns import (
+from spydertop.constants.columns import (
+    CONTAINER_COLUMNS,
     PROCESS_COLUMNS,
     FLAG_COLUMNS,
     SESSION_COLUMNS,
     CONNECTION_COLUMNS,
     LISTENING_SOCKET_COLUMNS,
+    Column,
 )
 from spydertop.model import AppModel
 from ..utils import is_event_in_widget
@@ -48,14 +50,14 @@ from ..utils import is_event_in_widget
 # some of these are only necessary due to python's lambda behavior
 
 
-def change_columns(columns, name):
+def change_columns(columns: List[Column], name):
     """Create a lambda to enable/disable a column"""
 
     def inner(enabled, model):
-        for i, col in enumerate(columns):
-            if col[0] == name:
+        for col in columns:
+            if col.header_name == name:
                 model.columns_changed = True
-                columns[i] = (col[0], col[1], col[2], col[3], col[4], enabled)
+                col.enabled = enabled
                 return
 
     return inner
@@ -78,9 +80,9 @@ def set_config(name):
     return inner
 
 
-def get_enabled(columns, index):
+def get_enabled(columns: List[Column], index: int):
     """Get the enabled status of a column"""
-    return lambda _: columns[index][5]
+    return lambda _: columns[index].enabled
 
 
 def collapse_tree(val, model):
@@ -100,43 +102,51 @@ OPTIONS = {
     "Columns": {
         "Processes": [
             (
-                col[0],
-                (col[5], get_enabled(PROCESS_COLUMNS, i)),
-                change_columns(PROCESS_COLUMNS, col[0]),
+                col.header_name,
+                (col.enabled, get_enabled(PROCESS_COLUMNS, i)),
+                change_columns(PROCESS_COLUMNS, col.header_name),
             )
             for i, col in enumerate(PROCESS_COLUMNS)
         ],
         "Flags": [
             (
-                col[0],
-                (col[5], get_enabled(FLAG_COLUMNS, i)),
-                change_columns(FLAG_COLUMNS, col[0]),
+                col.header_name,
+                (col.enabled, get_enabled(FLAG_COLUMNS, i)),
+                change_columns(FLAG_COLUMNS, col.header_name),
             )
             for i, col in enumerate(FLAG_COLUMNS)
         ],
         "Sessions": [
             (
-                col[0],
-                (col[5], get_enabled(SESSION_COLUMNS, i)),
-                change_columns(SESSION_COLUMNS, col[0]),
+                col.header_name,
+                (col.enabled, get_enabled(SESSION_COLUMNS, i)),
+                change_columns(SESSION_COLUMNS, col.header_name),
             )
             for i, col in enumerate(SESSION_COLUMNS)
         ],
         "Connections": [
             (
-                col[0],
-                (col[5], get_enabled(CONNECTION_COLUMNS, i)),
-                change_columns(CONNECTION_COLUMNS, col[0]),
+                col.header_name,
+                (col.enabled, get_enabled(CONNECTION_COLUMNS, i)),
+                change_columns(CONNECTION_COLUMNS, col.header_name),
             )
             for i, col in enumerate(CONNECTION_COLUMNS)
         ],
         "Listening": [
             (
-                col[0],
-                (col[5], get_enabled(LISTENING_SOCKET_COLUMNS, i)),
-                change_columns(LISTENING_SOCKET_COLUMNS, col[0]),
+                col.header_name,
+                (col.enabled, get_enabled(LISTENING_SOCKET_COLUMNS, i)),
+                change_columns(LISTENING_SOCKET_COLUMNS, col.header_name),
             )
             for i, col in enumerate(LISTENING_SOCKET_COLUMNS)
+        ],
+        "Containers": [
+            (
+                col.header_name,
+                (col.enabled, get_enabled(CONTAINER_COLUMNS, i)),
+                change_columns(CONTAINER_COLUMNS, col.header_name),
+            )
+            for i, col in enumerate(CONTAINER_COLUMNS)
         ],
     },
     # there is currently no mechanism to enable/disable meters
@@ -218,7 +228,7 @@ class SetupFrame(Frame):
     _main_column: ListBox
     _second_column: ListBox
     _has_textbox: bool = False
-    _on_death: Callable
+    _on_death: Optional[Callable]
 
     def __init__(
         self, screen: Screen, model: AppModel, on_death: Optional[Callable] = None
@@ -262,20 +272,22 @@ class SetupFrame(Frame):
         self.rebuild()
 
     def process_event(self, event):
+        assert self.scene is not None
         if isinstance(event, KeyboardEvent):
             if (
                 event.key_code == Screen.KEY_ESCAPE
                 or event.key_code == Screen.KEY_F10
                 or (event.key_code in {ord("q"), ord("Q")} and not self._has_textbox)
             ):
-                self._scene.remove_effect(self)
+                self.scene.remove_effect(self)
                 if self._on_death is not None:
                     self._on_death()
         elif isinstance(event, MouseEvent):
             if is_event_in_widget(event, self) and (event.buttons != 0):
                 # when a click is outside the modal, close it
-                self._scene.remove_effect(self)
-                self._on_death()
+                self.scene.remove_effect(self)
+                if self._on_death is not None:
+                    self._on_death()
 
         super().process_event(event)
         if self._model.config.settings_changed:
@@ -363,16 +375,18 @@ class SetupFrame(Frame):
         self._layout.clear_widgets()
         self._layout.add_widget(self._main_column, 0)
 
+        selected_col = str(self._main_column.value)
+
         # second Column
         self._second_column.options = (
-            [(x, x) for x in OPTIONS[self._main_column.value].keys()]
-            if isinstance(OPTIONS[self._main_column.value], dict)
+            [(x, x) for x in OPTIONS[selected_col].keys()]
+            if isinstance(OPTIONS[selected_col], dict)
             else []
         )
         self._layout.add_widget(self._second_column, 1)
 
         # Main view
-        widgets = OPTIONS[self._main_column.value]
+        widgets = OPTIONS[selected_col]
         if isinstance(widgets, dict):
             widgets = widgets[self._second_column.value]
         for widget in widgets:

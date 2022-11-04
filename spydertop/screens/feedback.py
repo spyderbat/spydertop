@@ -16,7 +16,8 @@ from asciimatics.exceptions import NextScene
 
 from spydertop.model import AppModel
 from spydertop.widgets import FuncLabel, Padding
-from spydertop.utils import ExtendedParser, add_palette
+from spydertop.utils import add_palette
+from spydertop.utils.types import ExtendedParser
 
 
 class FeedbackFrame(Frame):
@@ -133,5 +134,5 @@ for all. Thank you!
         raise NextScene("Main")
 
     def _submit_feedback(self):
-        self._model.submit_feedback(self._feedback_widget.value)
+        self._model.submit_feedback(str(self._feedback_widget.value))
         raise NextScene("Main")

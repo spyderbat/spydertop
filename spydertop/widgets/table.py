@@ -11,19 +11,21 @@ It extends the functionality of the asciimatics.widgets.MultiColumnListBox
 """
 
 import re
-from typing import Any, Dict, List, NewType, Optional, Tuple
+from typing import Any, Dict, List, NewType, Optional, Tuple, Union
 
 from asciimatics.screen import Screen
 from asciimatics.event import KeyboardEvent, MouseEvent
 from asciimatics.widgets import Widget
 from asciimatics.parsers import Parser
 from asciimatics.strings import ColouredText
+from spydertop.constants.columns import Column
 
-from spydertop.utils import COLOR_REGEX, ExtendedParser
+from spydertop.utils.types import Alignment, ExtendedParser
+from spydertop.constants import COLOR_REGEX
 from spydertop.model import AppModel, Tree
 from spydertop.config import Config
 
-InternalRow = NewType("InternalRow", Tuple[List[str], List[Any]])
+InternalRow = NewType("InternalRow", Tuple[List[Union[ColouredText, str]], List[Any]])
 
 
 class Table(Widget):  # pylint: disable=too-many-instance-attributes
@@ -34,14 +36,13 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
 
     tree: Tree
 
-    # format: (name, enabled, width, align)
-    _columns: List[Tuple[str, bool, int, str]] = {}
+    columns: List[Column] = []
     _rows: List[InternalRow] = []
     _filtered_rows: List[InternalRow] = []
     _tree_rows: Optional[List[InternalRow]] = None
 
     _config: Config
-    _parser: Parser = None
+    _parser: Parser
 
     _vertical_offset: int = 0
     _horizontal_offset: int = 0
@@ -64,7 +65,10 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         self._config = model.config
         self.tree = tree
 
-    def update(self, frame_no):  # pylint: disable=too-many-branches,too-many-locals
+    def update(
+        self, frame_no
+    ):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+        assert self._frame is not None
         # select the followed id
         if self._state["id_to_follow"] is not None and self._config["follow_record"]:
             for i, row in enumerate(self._filtered_rows):
@@ -86,8 +90,8 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
 
         # first, print the header
         offset = -self._horizontal_offset
-        for (name, enabled, width, align) in self._columns:
-            if name == self._config["sort_column"]:
+        for col in self.columns:
+            if col.header_name == self._config["sort_column"]:
                 color, attr, background = self._frame.palette.get(
                     "table_header_selected", self._frame.palette["selected_focus_field"]
                 )
@@ -97,14 +101,15 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                     "table_header", self._frame.palette["title"]
                 )
                 arrow = ""
+            width = col.max_width
             if width == 0:
                 width = max(self._w - offset, 1)
 
             assert width > 0
 
-            if enabled:
+            if col.enabled:
                 self._frame.canvas.paint(
-                    f"{name+arrow:{align}{width}} ",
+                    f"{col.header_name+arrow:{col.align}{width}} ",
                     self._x + offset,
                     self._y,
                     color,
@@ -130,23 +135,24 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                     "table", self._frame.palette["focus_field"]
                 )
                 has_color = True
-            for j, (name, enabled, width, align) in enumerate(self._columns):
-                if enabled:
+            for j, col in enumerate(self.columns):
+                width = col.max_width
+                if col.enabled:
                     if width == 0:
                         width = (
                             self._w
-                            - sum(_[2] + 1 for _ in self._columns if _[1])
+                            - sum(_.max_width + 1 for _ in self.columns if _.enabled)
                             + self._horizontal_offset
                         )
-                    line = displayable_row[j].replace("\n", " ")
+                    line = str(displayable_row[j]).replace("\n", " ")
                     # first, the space needed to pad the text to the correct alignment
                     # is calculated.
                     extra_space = width - len(re.sub(COLOR_REGEX, "", str(line)))
                     left_space = (
                         0
-                        if align == "<"
+                        if col.align == Alignment.LEFT
                         else extra_space // 2
-                        if align == "^"
+                        if col.align == Alignment.CENTER
                         else extra_space
                     )
                     spaces = " " * left_space
@@ -166,7 +172,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                         color,
                         attr,
                         background,
-                        colour_map=line.colour_map
+                        colour_map=line.colour_map  # type: ignore
                         if hasattr(line, "colour_map") and has_color
                         else None,
                     )
@@ -231,18 +237,19 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                     return event
                 if relative_y == 0:
                     # this is the header
-                    for (name, enabled, width, _) in self._columns:
-                        if not enabled:
+                    relative_x += self._horizontal_offset
+                    for col in self.columns:
+                        if not col.enabled:
                             continue
-                        if relative_x - width - 1 < 0 or width == 0:
-                            if self._config["sort_column"] == name:
+                        if relative_x - col.max_width - 1 < 0 or col.max_width == 0:
+                            if self._config["sort_column"] == col.header_name:
                                 self._config["sort_ascending"] = not self._config[
                                     "sort_ascending"
                                 ]
                             else:
-                                self._config["sort_column"] = name
+                                self._config["sort_column"] = col.header_name
                             break
-                        relative_x -= width + 1
+                        relative_x -= col.max_width + 1
                 else:
                     # select the clicked row
                     self.value = relative_y - 1 + self._vertical_offset
@@ -254,23 +261,6 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
 
     def reset(self):
         pass
-
-    def set_columns(self, columns: List[Tuple]) -> None:
-        """
-        Set the columns for the table. This uses the same format as the
-        columns in columns.py.
-
-        :param columns: a list of tuples, each with the following keys:
-            - name: the name of the column
-            - displayable: the lambda for displayable data (unused)
-            - align: the alignment of the column
-            - width: the width of the column
-            - sortable: the lambda for sortable data (unused)
-            - enabled: whether the column is enabled or not
-        """
-        self._columns = [
-            (column[0], column[5], column[3], column[2]) for column in columns
-        ]
 
     def set_rows(
         self, displayable_rows: List[List[str]], sortable_rows: List[List[Any]]
@@ -286,7 +276,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         if len(displayable_rows) != 0:
             assert len(displayable_rows[0]) == len(sortable_rows[0])
 
-        self._rows = list(zip(displayable_rows, sortable_rows))
+        self._rows = list(zip(displayable_rows, sortable_rows))  # type: ignore
         self.do_sort()
 
     def do_sort(self) -> None:
@@ -298,7 +288,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         # first, and to modify the command
         if self._config["tree"] and self._config["tab"] == "processes":
             # we need the columns to have an ID
-            assert self._columns[0][0] == "ID"
+            assert self.columns[0].header_name == "ID"
             # refactor cached sortable data to be indexed by id
             sortable = {}
             for row in self._rows:
@@ -316,7 +306,9 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         value = self._config["filter"]
         rows = (
             self._tree_rows
-            if self._config["tree"] and self._config["tab"] == "processes"
+            if self._config["tree"]
+            and self._config["tab"] == "processes"
+            and self._tree_rows is not None
             else self._rows
         )
         if value is None:
@@ -337,7 +329,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         # filter by specific columns
         for column_match in column_matches:
             try:
-                index = [_[0].lower() for _ in self._columns].index(
+                index = [_.header_name.lower() for _ in self.columns].index(
                     column_match[0].lower()
                 )
                 if index >= len(row[0]):
@@ -352,19 +344,21 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                     elif row[1][index] <= float(column_match[1][1:]):
                         return False
                 # handle nots
-                elif column_match[1][0] == "!" and column_match[1][1:] in row[0][index]:
+                elif column_match[1][0] == "!" and column_match[1][1:] in str(
+                    row[0][index]
+                ):
                     return False
                 # handle case with no operator
-                elif (column_match[1][0] != "!") and not column_match[1] in row[0][
-                    index
-                ]:
+                elif (column_match[1][0] != "!") and not column_match[1] in str(
+                    row[0][index]
+                ):
                     return False
             except ValueError:
                 pass
 
         # match the rest against the entire visible row
         combined = " ".join(
-            [str(v) for i, v in enumerate(row[0]) if self._columns[i][1]]
+            [str(v) for i, v in enumerate(row[0]) if self.columns[i].enabled]
         )
 
         if len(rest) > 0 and rest[0] == "!":
@@ -421,7 +415,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         rows: Dict[str, Tuple],
         depth: int,
         parents_end: List[bool],
-    ) -> List[Tuple[Any, int]]:
+    ) -> List[InternalRow]:
         """Sort a level of the tree, appending sorted versions
         of the children underneath each row."""
         level = []
@@ -452,7 +446,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
             )
             if isinstance(new_displayable[-1], ColouredText):
                 new_displayable[-1] = ColouredText(
-                    prefix + new_displayable[-1].raw_text, self._parser
+                    prefix + new_displayable[-1].raw_text, self._parser  # type: ignore
                 )
             else:
                 new_displayable[-1] = prefix + new_displayable[-1]
@@ -476,7 +470,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         key = self._config["sort_column"]
         ascending = self._config["sort_ascending"]
         # sort by PID by default
-        col_names = [_[0] for _ in self._columns]
+        col_names = [_.header_name for _ in self.columns]
         if "PID" in col_names:
             pid_index = col_names.index("PID")
             rows.sort(key=lambda x: x[1][pid_index])
@@ -485,6 +479,9 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
             return rows
 
         index = col_names.index(key)
+
+        if self.columns[index].value_type is dict:
+            return rows
 
         def key_func(val):
             return val[1][index]

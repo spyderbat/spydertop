@@ -5,8 +5,6 @@
 # Copyright 2022 Spyderbat, Inc. All rights reserved.
 #
 
-# pylint: disable=too-many-lines
-
 """
 The main frame for the tool. This frame contains the record list and usage metrics,
 as well as showing all the menu buttons.
@@ -14,8 +12,8 @@ as well as showing all the menu buttons.
 
 from math import nan
 import re
-from typing import Any, Dict, List, Optional, Tuple
-import urllib
+from typing import Any, Dict, List, Optional
+import urllib.parse
 import webbrowser
 
 import pyperclip
@@ -43,21 +41,18 @@ from spydertop.screens.meters import (
     show_uptime,
 )
 from spydertop.screens.modals import InputModal, NotificationModal
-from spydertop.table import Table
-from spydertop.utils import (
-    API_LOG_TYPES,
-    BetterDefaultDict,
-    ExtendedParser,
-    log,
-    convert_to_seconds,
-    pretty_time,
-)
-from spydertop.columns import (
+from spydertop.widgets import Table
+from spydertop.utils import log, convert_to_seconds, pretty_time, calculate_widths
+from spydertop.utils.types import ExtendedParser
+from spydertop.constants import API_LOG_TYPES
+from spydertop.constants.columns import (
+    CONTAINER_COLUMNS,
     PROCESS_COLUMNS,
     SESSION_COLUMNS,
     CONNECTION_COLUMNS,
     FLAG_COLUMNS,
     LISTENING_SOCKET_COLUMNS,
+    Column,
 )
 from spydertop.widgets import FuncLabel, Meter, Padding
 from spydertop.screens.footer import Footer
@@ -76,14 +71,14 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     needs_update: bool = True
     needs_recalculate: bool = True
     _cached_options: Optional[List] = None
-    _cached_sortable: Optional[List] = None
-    _cached_displayable: Optional[List] = None
-    _current_columns: List = PROCESS_COLUMNS
+    _cached_sortable: List = []
+    _cached_displayable: List = []
+    _current_columns: List[Column] = PROCESS_COLUMNS
     _old_column_val = None
     _last_effects: int = 1
 
     # widgets
-    _main: Layout = None
+    _main: Layout
     _footer: Footer
     _cpus: List[Meter] = []
     _tabs: List[Button] = []
@@ -196,11 +191,11 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         header.add_widget(Padding(), 1)
 
         ################# Main Table Tabs #######################
-        tabs_layout = Layout(self.calculate_widths([1] * 5))
+        tabs_layout = Layout(calculate_widths(self.screen.width, [1] * 6))
         self._tabs = []
         self.add_layout(tabs_layout)
         for i, name in enumerate(
-            ["Processes", "Flags", "Sessions", "Connections", "Listening"]
+            ["Processes", "Flags", "Sessions", "Connections", "Listening", "Containers"]
         ):
 
             def wrapper(name):
@@ -228,7 +223,9 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             parser=ExtendedParser(),
             color="focus_button",
         )
-        self._footer = Footer(self.calculate_widths([1] * 10 + [3]), self, [], status)
+        self._footer = Footer(
+            calculate_widths(self.screen.width, [1] * 10 + [3]), self, [], status
+        )
         self.add_layout(self._footer)
         self._switch_buttons("main")
 
@@ -241,6 +238,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     # -- overrides -- #
     def update(self, frame_no):  # pylint: disable=too-many-branches,too-many-statements
         conf = self._model.config
+        assert self.scene is not None, "Frame must be added to a scene before updating"
 
         # if model is in failure state, raise next scene
         if self._model.failed:
@@ -314,20 +312,20 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
         # update columns if needed
         if self._model.columns_changed:
-            self._columns.set_columns(self._current_columns)
+            self._columns.columns = self._current_columns
             self._model.columns_changed = False
             self.needs_screen_refresh = True
 
         # detect changes in effects (opened/closed)
-        if len(self._scene.effects) != self._last_effects:
-            self._last_effects = len(self._scene.effects)
+        if len(self.scene.effects) != self._last_effects:
+            self._last_effects = len(self.scene.effects)
             self.needs_screen_refresh = True
 
         try:
             # work up the caching system, updating each part of the cache
             # only if necessary
             if self.needs_recalculate:
-                self._build_options()
+                self._build_options(getattr(self._model, self._model.config["tab"]))
                 self.needs_recalculate = False
                 self.needs_update = True
 
@@ -340,13 +338,10 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             if self.needs_screen_refresh:
                 # update header
                 for (i, cpu) in enumerate(self._cpus):
-                    cpu.value = update_cpu(i, self._model)
-                (total, values) = update_memory(self._model)
-                self._memory.total = total
-                self._memory.value = values
-                (total, values) = update_swap(self._model)
-                self._swap.total = total
-                self._swap.value = values
+                    values = update_cpu(i, self._model)
+                    cpu.value = values
+                (self._memory.total, self._memory.value) = update_memory(self._model)
+                (self._swap.total, self._swap.value) = update_swap(self._model)
 
                 self.needs_screen_refresh = False
                 # time screen update
@@ -379,6 +374,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             "s": lambda: self._switch_to_tab("sessions"),
             "c": lambda: self._switch_to_tab("connections"),
             "l": lambda: self._switch_to_tab("listening"),
+            "n": lambda: self._switch_to_tab("containers"),
             " ": self._play,
             "C": self._show_setup,
             "S": self._show_setup,
@@ -426,154 +422,53 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     # -- update handling -- #
     def _update_columns(self):
         """Update the columns in the multi-column list box widget."""
-        self._columns.set_columns(self._current_columns)
+        self._columns.columns = self._current_columns
         self._columns.set_rows(self._cached_displayable, self._cached_sortable)
 
-    def _build_options(self):
-        """Build the options for the records table, depending on the current tab."""
-        if self._model.config["tab"] == "processes":
-            (
-                self._cached_displayable,
-                self._cached_sortable,
-            ) = self._build_process_options()
-
-        if self._model.config["tab"] == "sessions":
-            (
-                self._cached_displayable,
-                self._cached_sortable,
-            ) = self._build_other_options(self._model.sessions)
-
-        if self._model.config["tab"] == "flags":
-            (
-                self._cached_displayable,
-                self._cached_sortable,
-            ) = self._build_other_options(self._model.flags)
-
-        if self._model.config["tab"] == "connections":
-            (
-                self._cached_displayable,
-                self._cached_sortable,
-            ) = self._build_other_options(self._model.connections)
-
-        if self._model.config["tab"] == "listening":
-            (
-                self._cached_displayable,
-                self._cached_sortable,
-            ) = self._build_other_options(self._model.listening)
-
-    def _build_other_options(self, records: Dict[str, Any]) -> Tuple[List, List]:
+    def _build_options(self, records: Dict[str, Any]):
         """Builds options for records other than the processes tab, using
         the current columns"""
-        rows = []
-        sortable_rows = []
+        self._cached_displayable = []
+        self._cached_sortable = []
+
+        if self._model.timestamp is None:
+            self._model.recover()
+            self.needs_recalculate = True
+            return
 
         for record in records.values():
             # determine if the record is visible for this time
             if "valid_from" in record:
-                if record["valid_from"] > self._model.timestamp:
-                    continue
-                end_time = record.get("valid_to", None)
-                if (
-                    end_time is not None
-                    and end_time < self._model.timestamp - self._model.time_elapsed
+                if record["valid_from"] > self._model.timestamp or (
+                    "valid_to" in record
+                    and record["valid_to"]
+                    < self._model.timestamp - self._model.time_elapsed
                 ):
                     continue
             elif "time" in record:
                 # show all events only after they occur
                 if self._model.timestamp < record["time"]:
                     continue
-            # build the row for options
-            cells = []
-            sortable_cells = []
-            for col in self._current_columns:
-                sort_val = col[4](self._model, record)
-                # pylint: disable=no-value-for-parameter
-                cells.append(str(col[1](self._model, record)))
-                sortable_cells.append(sort_val)
 
-            rows.append(cells)
-            sortable_rows.append(sortable_cells)
-
-        return rows, sortable_rows
-
-    def _build_process_options(  # pylint: disable=too-many-locals
-        self,
-    ) -> Tuple[List, List]:
-        """Build options for the processes tab. This requires more work than
-        the other tabs, because the data is not in a single record; the
-        event_top data is also required to be bundled in"""
-        model_processes = self._model.processes
-        previous_et_processes, event_top_processes = self._model.get_top_processes()
-        defaults = (
-            event_top_processes["default"]
-            if event_top_processes is not None
-            else BetterDefaultDict(lambda k: nan if k != "state" else "?")
-        )
-
-        rows = []
-        sortable_rows = []
-
-        # loop through the process records, and fill in the event_top data
-        # if it is available
-        for process in model_processes.values():
-            # determine if the record is visible in this time period
-            if process["valid_from"] > self._model.timestamp:
-                continue
-            end_time = process.get("valid_to", None)
-            if end_time is not None and end_time < self._model.timestamp - self._model.time_elapsed:
-                continue
-
-            # ignore if the process is hidden
-            if (
+            # ignore if the record is a process and it is hidden
+            if self._model.config["tab"] == "processes" and (
                 self._model.config["hide_kthreads"]
-                and process["type"] == "kernel thread"
+                and record["type"] == "kernel thread"
+                or self._model.config["hide_threads"]
+                and record["type"] == "thread"
             ):
                 continue
-            if self._model.config["hide_threads"] and process["type"] == "thread":
-                continue
-
-            pid = str(process["pid"])
-
-            # if the process is a thread, it may not have a value in the event_top processes
-            if (
-                event_top_processes is not None
-                and previous_et_processes is not None
-                and pid in event_top_processes
-                and pid in previous_et_processes
-            ):
-                et_process = event_top_processes[pid]
-                prev_et_process = previous_et_processes[pid]
-            else:
-                et_process = None
-                prev_et_process = None
 
             # build the row for options
             cells = []
             sortable_cells = []
             for col in self._current_columns:
-                # expand the event_top data with defaults
-                if et_process is not None:
-                    full = defaults.copy()
-                    full.update(et_process)
-
-                    prev_full = defaults.copy()
-                    prev_full.update(prev_et_process)
-                else:
-                    full = None
-                    prev_full = None
-
-                # call the column functions with the full data
-                sort_val = col[4](self._model, prev_full, full, process)
-                cell_val = col[1](self._model, prev_full, full, process)
-                if cell_val is None:
-                    cell_val = ""
-                cells.append(str(cell_val))
+                sort_val = col.get_value(self._model, record)
+                cells.append(col.format_value(self._model, record, sort_val))
                 sortable_cells.append(sort_val)
 
-            rows.append(cells)
-            sortable_rows.append(sortable_cells)
-
-        return rows, sortable_rows
+            self._cached_displayable.append(cells)
+            self._cached_sortable.append(sortable_cells)
 
     # -- input handling -- #
     def _enable_disable(self):
@@ -675,7 +570,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self._model.config["sort_column"] = None
         self._model.config["filter"] = None
         self._cached_options = None
-        self._cached_sortable = None
+        self._cached_sortable = []
 
         self._model.log_api(API_LOG_TYPES["navigation"], {"tab": tab_name})
 
@@ -708,6 +603,11 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             self._model.config["sort_column"] = "DURATION"
             self._model.config["sort_ascending"] = True
 
+        if tab_name == "containers":
+            self._current_columns = CONTAINER_COLUMNS
+            self._model.config["sort_column"] = "CREATED"
+            self._model.config["sort_ascending"] = False
+
     def _show_sort_menu(self):
         """show the sort menu"""
         self._model.log_api(API_LOG_TYPES["navigation"], {"menu": "sort"})
@@ -720,7 +620,9 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         menu = InputModal(
             self.screen,
             label="Sort By:",
-            options=[(row[0], row[0]) for row in self._current_columns],
+            options=[
+                (row.header_name, row.header_name) for row in self._current_columns
+            ],
             on_submit=set_sort,
             widget=ListBox,
             theme=self._model.config["theme"],
@@ -728,7 +630,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             value=self._model.config["sort_column"],
             on_death=lambda: self._switch_buttons("main"),
         )
-        self._scene.add_effect(menu)
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        self.scene.add_effect(menu)
 
     def _show_search(self):
         """show the search input modal"""
@@ -741,7 +644,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             self._columns.find(value)
             self.needs_screen_refresh = True
 
-        self._scene.add_effect(
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        self.scene.add_effect(
             InputModal(
                 self.screen,
                 label="Search:",
@@ -764,7 +668,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             except (ValueError, IndexError):
                 return False
 
-        self._scene.add_effect(
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        self.scene.add_effect(
             InputModal(
                 self.screen,
                 label="Custom Time Offset:",
@@ -783,7 +688,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         def set_filter(value):
             self._model.config["filter"] = value
 
-        self._scene.add_effect(
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        self.scene.add_effect(
             InputModal(
                 self.screen,
                 self._model.config["filter"],
@@ -806,7 +712,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             or not isinstance(self._model.config.input, str)
         ):
             log.info("No row selected or no org/machine/input. Skipping URL")
-            self._scene.add_effect(
+            assert self.scene is not None, "A scene must be set in the frame before use"
+            self.scene.add_effect(
                 NotificationModal(
                     self.screen,
                     text="${1,1}Error:${-1,2} Cannot create URL. "
@@ -818,7 +725,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             return
 
         url = f"https://app.spyderbat.com/app/org/{self._model.config.org}\
-/source/{self._model.config.machine}/spyder-console?ids={urllib.parse.quote(row[0][0])}"
+/source/{self._model.config.machine}/spyder-console?ids={urllib.parse.quote(str(row[0][0]))}"
 
         # try to open the url in the browser and copy it to the clipboard
         browser_label = "URL not opened in browser"
@@ -834,7 +741,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         except Exception:  # pylint: disable=broad-except
             label = "Could not copy URL to the clipboard"
 
-        self._scene.add_effect(
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        self.scene.add_effect(
             NotificationModal(
                 self.screen,
                 text=f" {browser_label} \n {label} \n {url} ",
@@ -855,10 +763,12 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
         # convert the sorted rows to a human-readable string
         data_lines = ""
-        for (name, value) in zip([c[0] for c in self._current_columns], row[0]):
+        for (name, value) in zip(
+            [c.header_name for c in self._current_columns], row[0]
+        ):
             # remove any tree characters
             if isinstance(value, ColouredText):
-                value = value.raw_text
+                value = str(value.raw_text)  # type: ignore
             value = value.strip()
             if name == "Command":
                 value = re.sub(r"^(│  |   )*[├└][─+] ", "", value)
@@ -866,7 +776,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
         data_lines = data_lines.rstrip("\n")
 
-        self._scene.add_effect(
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        self.scene.add_effect(
             NotificationModal(
                 self.screen,
                 data_lines,
@@ -879,7 +790,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         """Show the setup screen"""
         self._model.log_api(API_LOG_TYPES["navigation"], {"menu": "setup"})
         self._switch_buttons("modal")
-        self._scene.add_effect(
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        self.scene.add_effect(
             SetupFrame(
                 self.screen,
                 self._model,
@@ -894,6 +806,10 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
     def _shift_time(self, offset: float):
         """Shift the time in Model by a given amount."""
+        assert self.scene is not None, "A scene must be set in the frame before use"
+        if self._model.timestamp is None:
+            self._model.recover()
+            return
         # the minimum offset should be to the next top time
         min_offset = (
             self._model.time_elapsed if self._model.time_elapsed is not nan else 1
@@ -917,7 +833,7 @@ Some information displayed may not be accurate\
         # if the offset is large, notify the user
         if abs(offset) > 10:
             direction = "forward" if offset > 0 else "backward"
-            self._scene.add_effect(
+            self.scene.add_effect(
                 NotificationModal(
                     self.screen,
                     f"Moved {pretty_time(abs(round(offset)))} {direction}",
@@ -951,20 +867,12 @@ Some information displayed may not be accurate\
             self._model.rebuild_tree()
             self._columns.tree = self._model.tree
 
-    # -- miscellaneous -- #
-    def calculate_widths(self, desired_columns: List[int]) -> List[int]:
-        """Manually calculate the widths for a Layout, as the default has rounding errors."""
-        total_width = self.screen.width
-        total_desired = sum(desired_columns)
-        actual_widths = [int(x / total_desired * total_width) for x in desired_columns]
-        actual_widths[-1] += total_width - sum(actual_widths)
-        return actual_widths
-
     # -- moving to other frames -- #
     def _back(self):
         """Move back to configuring sources"""
         # don't go back if the input is from a file
         if not isinstance(self._model.config.input, str):
+            assert self.scene is not None, "A scene must be set in the frame before use"
             self.scene.add_effect(
                 NotificationModal(
                     self.screen,

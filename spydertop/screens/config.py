@@ -15,7 +15,7 @@ import fnmatch
 import re
 from time import sleep
 from threading import Thread
-from datetime import datetime, timedelta, timezone, tzinfo
+from datetime import datetime, time, timedelta, timezone, tzinfo
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 import yaml
@@ -40,13 +40,12 @@ from spydertop.config import Config
 from spydertop.model import AppModel
 from spydertop.widgets import FuncLabel, Padding
 from spydertop.utils import (
-    API_LOG_TYPES,
-    COLOR_REGEX,
-    ExtendedParser,
     get_timezone,
     pretty_datetime,
     log,
 )
+from spydertop.constants import API_LOG_TYPES, COLOR_REGEX
+from spydertop.utils.types import ExtendedParser
 
 
 class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
@@ -75,7 +74,7 @@ class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self.model = model
 
         self.cache, self.set_cache = model.use_state(
-            self._name,
+            str(self._name),
             {
                 "has_account": None,  # Optional[bool]
                 "orgs": None,  # Optional[List]
@@ -176,6 +175,7 @@ Please make sure you entered it correctly.",
                 self.build_config_save()
                 return
             log.info("Config is complete, starting load")
+            log.info(self.config)
             self.model.init()
             raise NextScene("Loading")
 
@@ -242,7 +242,7 @@ repository) like so:
                 return
 
             # if there are orgs, determine how many, and pick one
-            if self.cache["orgs"]:
+            if self.cache["orgs"] is not None:
                 if len(self.cache["orgs"]) == 0:
                     self.build_error(
                         """\
@@ -399,7 +399,7 @@ Once you have a source configured, you can continue.\
                     except ValueError:
                         index = 0
 
-                def back():
+                def back_handler():
                     self.config.org_confirmed = False
                     self.config.source_confirmed = False
                     self._on_submit = None
@@ -409,6 +409,8 @@ Once you have a source configured, you can continue.\
                 # the user is in only one org
                 if self.cache["orgs"] and len(self.cache["orgs"]) == 1:
                     back = None
+                else:
+                    back = back_handler
 
                 self.build_question(
                     "Please select a machine",
@@ -431,18 +433,12 @@ Once you have a source configured, you can continue.\
             # just use the currently available time
             if self.cache["looking_for_sources"]:
                 try:
-                    self.config.start_time = (
-                        datetime.strptime(
-                            self.cache["sources"][0]["last_stored_chunk_end_time"],
-                            "%Y-%m-%dT%H:%M:%SZ",
-                        )
-                        .replace(tzinfo=timezone.utc)
-                        .timestamp()
-                    )
+                    self.config.start_time = datetime.strptime(
+                        self.cache["sources"][0]["last_stored_chunk_end_time"],
+                        "%Y-%m-%dT%H:%M:%SZ",
+                    ).replace(tzinfo=timezone.utc)
                 except ValueError:
-                    self.config.start_time = (
-                        datetime.now() - timedelta(0, 30)
-                    ).timestamp()
+                    self.config.start_time = datetime.now() - timedelta(0, 30)
                 self._needs_build = True
                 self._screen.force_update()
                 return
@@ -484,6 +480,8 @@ Once you have a source configured, you can continue.\
         text_input = None
 
         def on_search():
+            if text_input is None:
+                return
             new_options = [
                 (line[0], i)
                 for i, line in enumerate(answers)
@@ -587,7 +585,7 @@ clicking on 'Create API Key'.\
                 lambda: """\
 Please select a start time. This can also be passed as a command line argument; \
 see the help page for more information.\
-                """,
+""",
                 align="<",
             ),
             1,
@@ -599,7 +597,7 @@ see the help page for more information.\
         time_zone = get_timezone(self.model)
 
         def on_change():
-            selected_time = datetime.combine(date.value, time.value).replace(
+            selected_time = datetime.combine(date.value, time_widget.value).replace(
                 tzinfo=time_zone
             )
             # remove the color from the time label
@@ -613,10 +611,10 @@ see the help page for more information.\
             on_change=on_change,
         )
         self.layout.add_widget(date, 1)
-        time = TimePicker(label="Time:", seconds=True, on_change=on_change)
+        time_widget = TimePicker(label="Time:", seconds=True, on_change=on_change)
 
         self.layout.add_widget(Padding(), 1)
-        self.layout.add_widget(time, 1)
+        self.layout.add_widget(time_widget, 1)
 
         default_time = datetime.now(timezone.utc) - timedelta(minutes=15)
 
@@ -633,7 +631,7 @@ see the help page for more information.\
 
             def button_callback():
                 date.value = source_time_local
-                time.value = source_time_local.time()
+                time_widget.value = source_time_local.time()
                 warning_label.text = (
                     "Warning: the create time may not have complete data"
                 )
@@ -664,7 +662,7 @@ see the help page for more information.\
 
                 def last_seen_button_callback():
                     date.value = last_seen_time_local
-                    time.value = last_seen_time_local.time()
+                    time_widget.value = last_seen_time_local.time()
                     on_change()
 
                 last_seen_button = Button(
@@ -677,7 +675,7 @@ see the help page for more information.\
 
         default_time_local = default_time.astimezone(time_zone)
         date.value = default_time_local
-        time.value = default_time_local.time()
+        time_widget.value = default_time_local.time()
 
         # duration selector
         self.layout.add_widget(Padding(), 1)
@@ -713,7 +711,7 @@ see the help page for more information.\
             Button(
                 "Continue",
                 lambda: self.set_start_time(
-                    date.value, time.value, selected_duration, time_zone
+                    date.value, time_widget.value, selected_duration, time_zone  # type: ignore
                 ),
             ),
             1,
@@ -736,7 +734,7 @@ again the next time you start Spydertop, and will skip this configuration menu.
 
 These are default values, and can be overridden by passing them as command line \
 arguments (except for the API Key).\
-                """,
+""",
                 align="<",
             ),
             1,
@@ -821,7 +819,7 @@ arguments (except for the API Key).\
         self.set_cache(needs_saving=False)
         self.trigger_build()
 
-    def format_source(self, source: Source) -> str:
+    def format_source(self, source: Source) -> List[str]:
         """Format a source for display"""
         try:
             last_stored_time = (
@@ -867,12 +865,14 @@ arguments (except for the API Key).\
     def set_start_time(
         self,
         date: datetime,
-        time: datetime,
+        time_portion: time,
         duration: timedelta,
         time_zone: Union[timezone, tzinfo, None],
     ) -> None:
         """Set the start time"""
-        self.config.start_time = datetime.combine(date, time).replace(tzinfo=time_zone)
+        self.config.start_time = datetime.combine(date, time_portion).replace(
+            tzinfo=time_zone
+        )
         self.config.start_duration = duration
         self.trigger_build()
 
