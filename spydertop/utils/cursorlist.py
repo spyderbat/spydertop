@@ -31,7 +31,7 @@ class CursorList(Generic[CT]):
     until the previous conditions are satisfied.
     """
 
-    data: List[Dict]
+    data: List[dict]
     key: str
     index: int = -1
     cursor: Optional[CT] = None

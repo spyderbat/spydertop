@@ -23,6 +23,7 @@ API_LOG_TYPES = {
     "loaded_data": "SpydertopLoadedData",
     "orgs": "SpydertopOrgsListed",
     "sources": "SpydertopSourcesListed",
+    "clusters": "SpydertopClustersListed",
     "feedback": "SendFeedback",
     "navigation": "SpydertopNavigation",
     "account_created": "SpydertopAccountCreated",
