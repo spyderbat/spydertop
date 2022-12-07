@@ -16,6 +16,10 @@ from asciimatics.screen import Screen
 from asciimatics.widgets import Frame, Layout, TextBox, Button
 from asciimatics.exceptions import StopApplication
 
+from textual.app import ComposeResult
+from textual.screen import Screen as TScreen
+from textual.widgets import Static
+
 from spydertop.model import AppModel
 from spydertop.widgets import FuncLabel, Padding
 from spydertop.utils.types import ExtendedParser
@@ -143,3 +147,17 @@ later through the Support and Feedback menu on the help screen.
     def _submit_feedback(self):
         self._model.submit_feedback(self._state["feedback_text"])
         raise StopApplication("User Quit after submitting feedback")
+
+
+# rewrite to use textual
+
+
+class Quit(TScreen):
+    """A quitting screen that provides a last chance to submit feedback for new users"""
+
+    def __init__(self, model: AppModel) -> None:
+        super().__init__()
+        self._model = model
+
+    def compose(self) -> ComposeResult:
+        yield Static("Quit")

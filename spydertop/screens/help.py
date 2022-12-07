@@ -15,6 +15,10 @@ from asciimatics.widgets import Frame, Layout, Button
 from asciimatics.exceptions import NextScene
 from asciimatics.event import KeyboardEvent
 
+from textual.app import ComposeResult
+from textual.screen import Screen as TScreen
+from textual.widgets import Static
+
 from spydertop.model import AppModel
 from spydertop.widgets import FuncLabel, Padding
 from spydertop.utils import add_palette
@@ -205,3 +209,17 @@ Filter: ${{{label}, 1}}user: !root res:>100e6 opt${{{label}}}\
 
     def _quit(self):
         raise NextScene("Main")
+
+
+# rewrite to use textual
+
+
+class Help(TScreen):
+    """Help screen."""
+
+    def __init__(self, model: AppModel) -> None:
+        super().__init__()
+        self._model = model
+
+    def compose(self) -> ComposeResult:
+        yield Static("Help")

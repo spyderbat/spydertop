@@ -36,6 +36,12 @@ from asciimatics.screen import Screen
 from asciimatics.event import KeyboardEvent
 from asciimatics.exceptions import NextScene, StopApplication
 
+from textual.screen import Screen as TScreen
+from textual.widgets import Static
+from textual.widgets import Button as TButton
+from textual.containers import Horizontal
+from textual.app import ComposeResult
+
 from spydertop.config import Config
 from spydertop.model import AppModel
 from spydertop.widgets import FuncLabel, Padding
@@ -883,3 +889,25 @@ arguments (except for the API Key).\
     def quit(self) -> None:
         """Quit the application"""
         raise StopApplication("User quit")
+
+
+# rewrite of the above class for textual
+
+
+class ConfigScreen(TScreen):
+    """A screen for configuring the application"""
+
+    def __init__(self, model: AppModel) -> None:
+        super().__init__()
+        self.model = model
+        self.config = model.config
+
+    def compose(self) -> ComposeResult:
+        yield Static("Config Screen")
+        yield Horizontal(TButton("Continue"))
+
+    def on_button_pressed(self) -> None:
+        """Handle a button press"""
+        self.model.init()
+        self.app.pop_screen()
+        self.app.push_screen("loading")

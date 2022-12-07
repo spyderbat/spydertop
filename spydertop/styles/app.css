@@ -1,0 +1,66 @@
+/* 
+Accents:
+    #F56155
+    #8CED61
+    #3576B7
+    #48A3FF
+Slate:
+    #6D7786
+    #465062
+    #3F4754
+    #313846
+    #262C38
+    #1E232C
+    #1A1E26
+    #161A21
+Light grey:
+    #BEBFBB
+    #B2B3B1
+    #8C8C8B
+White & off white:
+    #FFFFFF
+    #FEFFF7 
+*/
+
+Loading,
+ConfigScreen,
+Failure {
+    align: center middle;
+    background: #1E232C;
+    color: #FFFFFF;
+}
+
+Static {
+    content-align-horizontal: center;
+}
+
+Loading>Horizontal {
+    height: 15;
+    align: center middle;
+}
+
+Loading>Horizontal>#logo {
+    width: 30;
+}
+
+Loading>Horizontal>#huge-name {
+    width: 76;
+    content-align-vertical: middle;
+    height: 100%;
+    padding-left: 1;
+}
+
+ConfigScreen>Horizontal {
+    margin: 1;
+    height: 1;
+    align: center middle;
+}
+
+Button {
+    border: none;
+    background: #48A3FF;
+}
+
+Button:hover {
+    background: #3576B7;
+}

@@ -15,6 +15,11 @@ from asciimatics.widgets import Frame, Layout, Button
 from asciimatics.exceptions import NextScene, StopApplication
 from asciimatics.event import KeyboardEvent
 
+from textual.app import ComposeResult
+from textual.screen import Screen as TScreen
+from textual.widgets import Static
+from textual.widgets import Button as TButton
+
 from spydertop.model import AppModel
 from spydertop.utils.types import ExtendedParser
 from spydertop.widgets import Padding, FuncLabel
@@ -113,3 +118,45 @@ class FailureFrame(Frame):
     @staticmethod
     def _quit():
         raise StopApplication("User quit after failure")
+
+
+# rewrite to use textual
+
+
+class Failure(TScreen):
+    """A failure screen to alert the user that data has failed to load,
+    and to allow them to recover or quit."""
+
+    def __init__(self, model: AppModel) -> None:
+        super().__init__()
+        self.model = model
+
+    def compose(self) -> ComposeResult:
+        yield Static(
+            """\
+[#F56155]⡇⢸ ⣇⡀ ⢀⡀ ⢀⡀ ⣀⡀ ⢀⣀ ⡇[/]
+[#F56155]⠟⠻ ⠇⠸ ⠣⠜ ⠣⠜ ⡧⠜ ⠭⠕ ⠅[/]
+
+Something went wrong, and I can't fix it:
+"""
+        )
+        yield Static(id="reason")
+        yield Static("What do you want to do?")
+        yield TButton("Revert to last loaded time", id="revert")
+        yield TButton("Go to the earliest loaded time", id="reload")
+        yield TButton("Quit", id="quit")
+
+    def on_mount(self) -> None:
+        """Called when the screen is mounted."""
+        self.get_child("reason").update(self.model.failure_reason)  # type: ignore
+
+    async def on_button_pressed(self, event: TButton.Pressed) -> None:
+        """Called when a button is pressed."""
+        if event.button.id == "revert":
+            self.model.recover("revert")
+            self.app.switch_screen("Main")
+        elif event.button.id == "reload":
+            self.model.recover("reload")
+            self.app.switch_screen("Main")
+        elif event.button.id == "quit":
+            await self.app.action_quit()

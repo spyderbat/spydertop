@@ -14,6 +14,10 @@ from asciimatics.screen import Screen
 from asciimatics.widgets import Frame, Layout, TextBox, Button
 from asciimatics.exceptions import NextScene
 
+from textual.app import ComposeResult
+from textual.screen import Screen as TScreen
+from textual.widgets import Static
+
 from spydertop.model import AppModel
 from spydertop.widgets import FuncLabel, Padding
 from spydertop.utils import add_palette
@@ -136,3 +140,25 @@ for all. Thank you!
     def _submit_feedback(self):
         self._model.submit_feedback(str(self._feedback_widget.value))
         raise NextScene("Main")
+
+
+# rewrite to use textual
+
+
+class FeedbackScreen(TScreen):
+    """A feedback screen with a collection of support links"""
+
+    def __init__(self, model: AppModel) -> None:
+        super().__init__()
+        self._model = model
+
+    def compose(self) -> ComposeResult:
+        yield Static(
+            """\
+ ⢎⡑ ⡀⢀ ⣀⡀ ⣀⡀ ⢀⡀ ⡀⣀ ⣰⡀
+ ⠢⠜ ⠣⠼ ⡧⠜ ⡧⠜ ⠣⠜ ⠏  ⠘⠤
+"""
+        )
+        yield Static(
+            "Seeing something strange? Did the bugs get out again? Here’s how to reach us:"
+        )

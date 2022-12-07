@@ -17,8 +17,7 @@ from os.path import exists
 
 import click
 from spydertop.config import Config
-from spydertop.screens import start_screen
-
+from spydertop.app import SpydertopApp
 from spydertop.utils import convert_to_seconds
 
 
@@ -216,4 +215,4 @@ def cli(  # pylint: disable=too-many-arguments
         log_level,
     )
 
-    start_screen(config)
+    SpydertopApp().set_config(config).run()

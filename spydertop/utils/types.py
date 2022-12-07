@@ -19,6 +19,7 @@ import logging
 
 import click
 from asciimatics.parsers import Parser
+from textual import log
 
 from spydertop.constants import COLOR_REGEX
 
@@ -191,6 +192,7 @@ class DelayedLog:
 
     def log(self, *messages: Any, log_level: int = logging.NOTSET):
         """Log a message to the console, by default at DEBUG level."""
+        log(" ".join(str(message) for message in messages), log_level=log_level)
         if self.logger is not None:
             self.logger.log(log_level, " ".join([str(_) for _ in messages]))
         if log_level >= self.log_level:

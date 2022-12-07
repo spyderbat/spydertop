@@ -10,52 +10,50 @@ The main frame for the tool. This frame contains the record list and usage metri
 as well as showing all the menu buttons.
 """
 
-from math import nan
 import re
-from typing import Any, Dict, List, Optional
 import urllib.parse
 import webbrowser
+from math import nan
+from typing import Any, Dict, List, Optional
 
 import pyperclip
-from asciimatics.screen import Screen
-from asciimatics.widgets import (
-    Frame,
-    Layout,
-    Button,
-    ListBox,
-)
-from asciimatics.exceptions import NextScene
 from asciimatics.event import KeyboardEvent
+from asciimatics.exceptions import NextScene
+from asciimatics.screen import Screen
 from asciimatics.strings import ColouredText
+from asciimatics.widgets import Button, Frame, Layout, ListBox
 
+from textual.app import ComposeResult
+from textual.screen import Screen as TScreen
+from textual.widgets import Static
+
+from spydertop.constants import API_LOG_TYPES
+from spydertop.constants.columns import (
+    CONNECTION_COLUMNS,
+    CONTAINER_COLUMNS,
+    FLAG_COLUMNS,
+    LISTENING_SOCKET_COLUMNS,
+    PROCESS_COLUMNS,
+    SESSION_COLUMNS,
+    Column,
+)
 from spydertop.model import AppModel
-from spydertop.screens.setup import SetupFrame
+from spydertop.screens.footer import Footer
 from spydertop.screens.meters import (
-    update_memory,
-    update_swap,
     show_disk_io,
     show_ld_avg,
     show_network,
     show_tasks,
-    update_cpu,
     show_uptime,
+    update_cpu,
+    update_memory,
+    update_swap,
 )
 from spydertop.screens.modals import InputModal, NotificationModal
-from spydertop.widgets import Table
-from spydertop.utils import log, convert_to_seconds, pretty_time, calculate_widths
+from spydertop.screens.setup import SetupFrame
+from spydertop.utils import calculate_widths, convert_to_seconds, log, pretty_time
 from spydertop.utils.types import ExtendedParser
-from spydertop.constants import API_LOG_TYPES
-from spydertop.constants.columns import (
-    CONTAINER_COLUMNS,
-    PROCESS_COLUMNS,
-    SESSION_COLUMNS,
-    CONNECTION_COLUMNS,
-    FLAG_COLUMNS,
-    LISTENING_SOCKET_COLUMNS,
-    Column,
-)
-from spydertop.widgets import FuncLabel, Meter, Padding
-from spydertop.screens.footer import Footer
+from spydertop.widgets import FuncLabel, Meter, Padding, Table
 
 
 class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
@@ -903,3 +901,17 @@ Some information displayed may not be accurate\
     def frame_update_count(self):
         # we handle update counts ourselves
         return 1
+
+
+# rewrite to use textual
+
+
+class Main(TScreen):
+    """Main screen for the app"""
+
+    def __init__(self, model: AppModel) -> None:
+        super().__init__()
+        self._model = model
+
+    def compose(self) -> ComposeResult:
+        yield Static("Main")
