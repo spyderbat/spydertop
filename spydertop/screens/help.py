@@ -96,7 +96,7 @@ ${{{label},1}}   Arrows:${{{background}}} scroll record list
 ${{{label},1}} S-Arrows:${{{background}}} scroll faster
 ${{{label},1}} Home/End:${{{background}}} jump to list top/bottom
 ${{{label},1}}  PgUp/Dn:${{{background}}} jump one page up/down
-${{{label},1}}    Enter:${{{background}}} chow full record details
+${{{label},1}}    Enter:${{{background}}} show full record details
 ${{{label},1}}Tab/S-Tab:${{{background}}} move to the next/previous tab
 ${{{label},1}}        u:${{{background}}} open a link to the console for the record
 ${{{label},1}}        U:${{{background}}} copy a link to the console for the record
