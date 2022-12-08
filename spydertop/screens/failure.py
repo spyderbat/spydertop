@@ -148,7 +148,7 @@ Something went wrong, and I can't fix it:
 
     def on_mount(self) -> None:
         """Called when the screen is mounted."""
-        self.get_child("reason").update(self.model.failure_reason)  # type: ignore
+        self.query_one("#reason").update(self.model.failure_reason)  # type: ignore
 
     async def on_button_pressed(self, event: TButton.Pressed) -> None:
         """Called when a button is pressed."""

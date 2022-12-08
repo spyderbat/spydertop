@@ -18,7 +18,6 @@ from asciimatics.event import KeyboardEvent
 from textual import events
 from textual.screen import Screen as TScreen
 from textual.widgets import Static
-from textual.message import Message, MessageTarget
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.reactive import reactive
@@ -215,13 +214,6 @@ class Loading(TScreen):
 
     app_size = reactive(tuple)
 
-    class Progressed(Message):
-        """Color selected message."""
-
-        def __init__(self, sender: MessageTarget, progress: float) -> None:
-            self.progress = progress
-            super().__init__(sender)
-
     def __init__(self, model: AppModel) -> None:
         super().__init__()
         self._model = model
@@ -271,22 +263,22 @@ class Loading(TScreen):
                 self._model.thread.join()
                 self.app.switch_screen("main")
                 return
-        self.get_child("progress-bar").post_message_no_wait(
-            self.Progressed(self, self._model.progress)
+        self.query_one("#progress-bar", ProgressBar).update_progress(
+            self._model.progress
         )
 
 
 class ProgressBar(Static):
     """A simple progress bar"""
 
-    def on_loading_progressed(self, event: Loading.Progressed) -> None:
+    def update_progress(self, progress: float) -> None:
         """update the progress bar on change"""
         max_bars = int(self.size.width / 3)
-        bars = int(event.progress * max_bars)
+        bars = int(progress * max_bars)
         loading_text = (
             "Loading: ["
             + ("|" * bars)
             + (" " * (max_bars - bars))
-            + f"] {round(event.progress*100,1):>5}%"
+            + f"] {round(progress*100,1):>5}%"
         )
         self.update(loading_text)

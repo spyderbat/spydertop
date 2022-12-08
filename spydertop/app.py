@@ -9,7 +9,6 @@
 Contains the main application object
 """
 
-import gzip
 from os import environ
 
 from textual.app import App
@@ -69,7 +68,7 @@ def run(**_kwargs) -> None:
             None,
             None,
             # pylint: disable=consider-using-with
-            open("examples/minikube-sock-shop.json.gz"),
+            open("examples/minikube-sock-shop.json.gz", "r", encoding="utf-8"),
             None,
             None,
             900,
