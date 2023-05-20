@@ -28,6 +28,12 @@ RecordInternal = NewType("RecordInternal", Any)
 Record = NewType("Record", Dict[str, RecordInternal])
 
 
+class APIError(Exception):
+    """
+    An error that occurs when communicating with the API
+    """
+
+
 # custom types for adding context to values and formatting
 class Bytes:
     """A class for formatting bytes in a human readable format"""

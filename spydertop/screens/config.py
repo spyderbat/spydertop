@@ -310,8 +310,9 @@ logging into your account on the website.\
 
                 def load_sources():
                     sources = self.model.get_sources()
-                    if sources is None:
-                        # the failure reason will be set by the model
+                    clusters = self.model.get_clusters()
+                    if sources is None and clusters is None:
+                        self.model.fail("Failed to load any machines or clusters")
                         self.trigger_build()
                         self._screen.force_update()
                         return
@@ -323,10 +324,11 @@ logging into your account on the website.\
                     self.set_cache(
                         sources=[
                             source
-                            for source in sources
+                            for source in (sources or [])
                             # the global source is not useful in this context
                             if not source["uid"].startswith("global:")
-                        ]
+                        ],
+                        clusters=clusters or [],
                     )
                     self.trigger_build()
                     self._screen.force_update()
@@ -341,7 +343,7 @@ logging into your account on the website.\
                 return
 
             # if there are no sources, guide the user through creating one
-            if self.cache["sources"] == []:
+            if self.cache["sources"] == [] and self.cache["clusters"] == []:
                 self.set_cache(needs_saving=True, sources=None)
                 self.build_instructions(
                     f"""\
