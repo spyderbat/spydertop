@@ -10,6 +10,7 @@ Custom or modified types for use in the application.
 """
 
 import bisect
+import datetime
 from enum import Enum
 import re
 from textwrap import TextWrapper
@@ -48,7 +49,7 @@ class Bytes:
 
     def __str__(self) -> str:
         n_bytes = self.value
-        for (suffix, color) in [("", None), ("K", None), ("M", 6), ("G", 2), ("T", 1)]:
+        for suffix, color in [("", None), ("K", None), ("M", 6), ("G", 2), ("T", 1)]:
             if n_bytes < 1000:
                 if suffix in {"K", ""}:
                     return f"{int(n_bytes)}{suffix}"
@@ -156,17 +157,10 @@ class DelayedLog:
     INFO = logging.INFO
     WARN = logging.WARN
     ERR = logging.ERROR
-    LOG_FG_COLORS = {
-        logging.DEBUG - 1: "white",
-        logging.DEBUG: "black",
-        logging.INFO: "black",
-        logging.WARN: "black",
-        logging.ERROR: "black",
-    }
-    LOG_BG_COLORS = {
+    LOG_COLORS = {
         logging.DEBUG - 1: "black",
         logging.DEBUG: "blue",
-        logging.INFO: "white",
+        logging.INFO: "cyan",
         logging.WARN: "yellow",
         logging.ERROR: "red",
     }
@@ -182,25 +176,27 @@ class DelayedLog:
 
     def dump(self):
         """Print all logs to the console."""
-        for (level, log_lines) in self._logs:
+        for level, log_lines in self._logs:
             for line in log_lines.split("\n"):
                 click.echo(
                     click.style(
-                        f"[{logging.getLevelName(level)}]",
-                        fg=self.LOG_FG_COLORS.get(level, None),
-                        bg=self.LOG_BG_COLORS.get(level, None),
+                        f"[{logging.getLevelName(level)}]".ljust(10),
+                        fg=self.LOG_COLORS.get(level, None),
                     ),
                     nl=False,
                 )
-                click.echo(f": {line}")
+                click.echo(line)
         self._logs = []
 
     def log(self, *messages: Any, log_level: int = logging.NOTSET):
         """Log a message to the console, by default at DEBUG level."""
+        line = f"{datetime.datetime.now().timestamp():.3f}: " + " ".join(
+            [str(_) for _ in messages]
+        )
         if self.logger is not None:
-            self.logger.log(log_level, " ".join([str(_) for _ in messages]))
+            self.logger.log(log_level, line)
         if log_level >= self.log_level:
-            self._logs.append((log_level, " ".join([str(_) for _ in messages])))
+            self._logs.append((log_level, line))
 
     def debug(self, *messages: Any):
         """Log an info message to the console."""
@@ -348,7 +344,7 @@ class CustomTextWrapper(TextWrapper):
                     cur_line.append(cur_style)
                     chunks[-1] = chunks[-1][len(color_match.group()) :]
                 self._handle_long_word(chunks, cur_line, cur_len, width)
-                cur_len = sum(map(len, cur_line))
+                cur_len = sum(map(len, cur_line), 0)
 
             # -- from standard implementation --
 

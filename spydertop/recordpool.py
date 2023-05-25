@@ -12,24 +12,19 @@ some of the data management functionality.
 
 
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 import json
-from typing import DefaultDict, Dict, List, Optional, Callable, TypeVar
+import threading
+from time import perf_counter
+from typing import DefaultDict, Dict, List, Literal, Optional
 
-import spyderbat_api
-from spyderbat_api.api import (
-    source_data_api,
-    org_api,
-    source_api,
-)
 import urllib3
-from urllib3.exceptions import MaxRetryError
+from urllib3.exceptions import MaxRetryError, PoolError
 
 from spydertop.config import Config
 from spydertop.utils import log
 from spydertop.utils.types import APIError, Record, TimeSpanTracker
-
-T = TypeVar("T")
 
 
 class RecordPool:
@@ -47,25 +42,21 @@ class RecordPool:
     clusters: Dict[str, List[dict]] = {}
 
     _config: Config
-    _api_client: Optional[spyderbat_api.ApiClient] = None
     _time_span_tracker = TimeSpanTracker()
+    _connection_pool: Optional[urllib3.PoolManager] = None
 
     def __init__(self, config: Config):
         self.records = defaultdict(lambda: {})
         self._config = config
 
-    def __del__(self):
-        if self._api_client:
-            self._api_client.close()
+    # def __del__(self):
+    #     if self._api_client:
+    #         self._api_client.close()
 
     def init_api(self) -> None:
         """Initialize the API client"""
-        if isinstance(self._config.input, str) and self._api_client is None:
-            configuration = spyderbat_api.Configuration(
-                access_token=self._config.api_key, host=self._config.input
-            )
-
-            self._api_client = spyderbat_api.ApiClient(configuration)
+        if isinstance(self._config.input, str) and self._connection_pool is None:
+            self._connection_pool = urllib3.PoolManager()
 
     def load(
         self,
@@ -89,39 +80,47 @@ class RecordPool:
 
             if timestamp is None:
                 raise RuntimeError("No start time specified")
+            if not self._config.api_key:
+                raise RuntimeError("No API key specified")
 
-            api_instance = source_data_api.SourceDataApi(self._api_client)
             input_data = {
                 # request data from a bit earlier, so that the information is properly filled out
-                "st": timestamp - before.total_seconds() + 30,
-                "et": timestamp + duration.total_seconds(),
-                "src": self._config.machine,
+                "start_time": timestamp - before.total_seconds() + 30,
+                "end_time": timestamp + duration.total_seconds(),
+                "src_uid": self._config.machine,
+                "org_uid": self._config.org,
             }
 
             # we need more than one event_top record, so a buffer of 30 seconds is used
             # to make sure the data is available
             self._time_span_tracker.add_time_span(
-                input_data["st"] + 30, input_data["et"]
+                input_data["start_time"] + 30, input_data["end_time"]
             )
 
-            lines += self.guard_api_call(
-                api_instance.src_data_query_v2,
-                **input_data,
-                org_uid=self._config.org,
-                dt="spydergraph",
-            ).split(b"\n")
-            lines += self.guard_api_call(
-                api_instance.src_data_query_v2,
-                **input_data,
-                org_uid=self._config.org,
-                dt="htop",
-            ).split(b"\n")
-            lines += self.guard_api_call(
-                api_instance.src_data_query_v2,
-                **input_data,
-                org_uid=self._config.org,
-                dt="k8s",
-            ).split(b"\n")
+            def call_api(data_type: str):
+                nonlocal lines
+                ndjson = self.guard_api_call(
+                    method="POST",
+                    url="/api/v1/source/query/",
+                    **input_data,
+                    data_type=data_type,
+                )
+                lines += ndjson.split(b"\n")
+
+            threads: list[threading.Thread] = []
+            start = perf_counter()
+            for data_type in ["htop", "k8s", "spydergraph"]:
+                data_t = data_type
+                thread = threading.Thread(target=call_api, args=(data_t,))
+                thread.start()
+                threads.append(thread)
+            for thread in threads:
+                thread.join()
+                self.progress += 1.0 / len(threads)
+                mid: float = perf_counter()
+                log.info(f"Partial API call took {mid - start} seconds")
+            end = perf_counter()
+            log.info(f"API call took {end - start} seconds")
         else:
             # file, read in records and parse
             log.info(f"Reading records from input file: {source.name}")
@@ -143,7 +142,10 @@ No more records can be loaded."
                 lines = [line.decode("utf-8") for line in lines]  # type: ignore
             self._config.output.write("\n".join([l.rstrip() for l in lines]))
 
+        start = perf_counter()
         self._process_records(lines)
+        end = perf_counter()
+        log.info(f"Processing records took {end - start} seconds")
         return len(lines)
 
     def _process_records(self, lines: List[str]) -> None:
@@ -189,9 +191,8 @@ Are you asking for the wrong time?"
 
     def load_orgs(self) -> None:
         """Fetch a list of organization for this api_key"""
-        api_instance: org_api.OrgApi = org_api.OrgApi(self._api_client)
 
-        orgs = self.guard_api_call(api_instance.org_list)
+        orgs = self.guard_api_call(method="GET", url="/api/v1/org/")
         orgs = json.loads(orgs)
         self.orgs = orgs
 
@@ -205,11 +206,6 @@ Are you asking for the wrong time?"
         """Fetch a list of sources for this api_key"""
         # this tends to take a long time for large organizations
         # because the returned json is all one big string
-        #
-        # we tell the api library to give us the raw response
-        # and then parse it ourselves to save some time
-        api_instance: source_api.SourceApi = source_api.SourceApi(self._api_client)
-
         kwargs = {}
         if page is not None:
             log.warn("Paging of sources is not currently supported by the API.")
@@ -220,7 +216,8 @@ Are you asking for the wrong time?"
         if uid is not None:
             kwargs["agent_uid_equals"] = uid
         raw_sources = self.guard_api_call(
-            api_instance.src_list,
+            method="GET",
+            url=f"/api/v1/org/{org_uid}/source/",
             org_uid=self._config.org,
             **kwargs,
         )
@@ -231,76 +228,73 @@ Are you asking for the wrong time?"
 
     def load_clusters(self, org_uid: str) -> None:
         """Fetch a list of clusters for this api_key"""
-        # for now, the cluster API is not supported in the python client
-        # so we have to do it manually
-        assert self._api_client is not None
-        http_client = self._api_client.rest_client.pool_manager
-
-        if not isinstance(self._config.input, str):
-            raise ValueError("Kubernetes data cannot be loaded; there is no url")
-
-        url = f"{self._config.input}/api/v1/org/{org_uid}/cluster/"
-        log.log(url)
-
-        headers = {
-            "Content-Type": "application/json",
-        }
-        if self._config.api_key is not None:
-            headers["Authorization"] = f"Bearer {self._config.api_key}"
-        else:
-            raise ValueError("Kubernetes data cannot be loaded; there is no API key")
-
-        # send the data to the API
-        try:
-            response: urllib3.HTTPResponse = http_client.request(
-                "GET", url, headers=headers
-            )
-        except MaxRetryError as exc:
-            raise APIError(
-                f"There was an issue trying to connect to the API. \
-Is the url {self._config.input} correct?"
-            ) from exc
-        # check the response
-        if response.status != 200:
-            raise APIError(
-                "Loading data from the api failed: " + response.data.decode("utf-8")
-            )
-
+        response = self.guard_api_call(
+            "GET",
+            f"/api/v1/org/{org_uid}/cluster/",
+        )
         # parse the response
-        self.clusters[org_uid] = json.loads(response.data)
+        self.clusters[org_uid] = json.loads(response)
         log.log(self.clusters[org_uid])
 
-    def guard_api_call(self, api_call: Callable, **input_data) -> bytes:
+    def guard_api_call(
+        self, method: Literal["GET", "POST"], url: str, **input_data
+    ) -> bytes:
         """Calls the api with the given arguments, properly handling any errors
         in the API call and converting them to an APIError"""
-        log.debug("Making API call with ", input_data)
+        headers = {
+            "Authorization": f"Bearer {self._config.api_key}",
+            "Content-Type": "application/json",
+        }
+        if self._connection_pool is None:
+            raise RuntimeError("Connection pool is not initialized")
+        if not isinstance(self._config.input, str):
+            raise ValueError("Data cannot be loaded from an API; there is no url")
+        log.debug(f"Making API call to {self._config.input + url} with ", input_data)
         try:
-            api_response: urllib3.HTTPResponse = api_call(
-                **input_data, _preload_content=False
+            api_response: urllib3.HTTPResponse = self._connection_pool.request(
+                method,
+                url=self._config.input + url,
+                headers=headers,
+                body=(json.dumps(input_data).encode() if method == "POST" else None),
             )
             newline = b"\n"
             log.debug(
-                f"Context-uid in response to {api_call.__name__}: {api_response.headers.get('x-context-uid', None)}, \
+                f"Context-uid in response to {url}: \
+{api_response.headers.get('x-context-uid', None)}, \
 status: {api_response.status}, size: {len(api_response.data.split(newline))}"
             )
-        except spyderbat_api.ApiException as exc:
-            log.debug(
-                f"""\
-Debug info:
-API Call: {api_call.__name__}
-Input data: {input_data}
-Status code: {exc.status}
-Reason: {exc.reason}
-Body: {exc.body}
-Context-UID: {exc.headers.get("x-context-uid", None) if exc.headers else None}\
-"""
-            )
-            raise APIError(
-                f"Loading data from the api failed with reason: {exc.reason}"
-            ) from exc
         except MaxRetryError as exc:
             raise APIError(
                 f"There was an issue trying to connect to the API. \
 Is the url {self._config.input} correct?"
             ) from exc
+        except Exception as exc:
+            log.traceback(exc)
+            log.debug(
+                f"""\
+Debug info:
+API Call: {url}
+Input data: {input_data}
+Args: {exc.args}\
+"""
+            )
+            raise APIError("There was an issue trying to connect to the API.") from exc
+
+        if api_response.status != 200:
+            log.debug(
+                f"""\
+Debug info:
+API Call: {method} {url}
+Input data: {input_data}
+Status code: {api_response.status}
+Reason: {api_response.reason}
+Headers: {api_response.headers}
+Request Headers: {headers}
+Body: {api_response.data.decode("utf-8")}
+Context-UID: {api_response.headers.get("x-context-uid", None) if api_response.headers else None}\
+"""
+            )
+            raise APIError(
+                f"Loading data from the api failed with reason: {api_response.reason}"
+            )
         return api_response.data

@@ -2,12 +2,13 @@
 *.egg-info
 __pycache__
 .mypy_cache
-.env
 
 # development
 /build
 /dist
 .vscode/settings.json
+.env
+.venv
 
 # files created by spydertop
 *.json.gz

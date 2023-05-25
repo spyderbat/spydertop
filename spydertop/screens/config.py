@@ -19,7 +19,6 @@ from datetime import datetime, time, timedelta, timezone, tzinfo
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 import yaml
-from spyderbat_api.models import Org, Source
 from asciimatics.widgets import (
     Frame,
     MultiColumnListBox,
@@ -419,6 +418,7 @@ Once you have a source configured, you can continue.\
                     [
                         (
                             [
+                                "Cluster:",
                                 cluster.get("name", ""),
                                 " ",
                                 pretty_datetime(
@@ -783,7 +783,6 @@ arguments (except for the API Key).\
             to_save[k] = not to_save[k]
 
         for key, val in to_save.items():
-
             value = getattr(self.config, key.lower())
             if key == "API_Key":
                 # Show only the first and last few characters of the API key
@@ -850,7 +849,7 @@ arguments (except for the API Key).\
         self.set_cache(needs_saving=False)
         self.trigger_build()
 
-    def format_source(self, source: Source) -> List[str]:
+    def format_source(self, source) -> List[str]:
         """Format a source for display"""
         try:
             last_stored_time = (
@@ -864,6 +863,7 @@ arguments (except for the API Key).\
         except OverflowError:
             last_stored_time = datetime.fromtimestamp(0).replace(tzinfo=timezone.utc)
         return [
+            "Machine:",
             source.get("description", ""),
             " ",
             pretty_datetime(last_stored_time)
@@ -878,7 +878,7 @@ arguments (except for the API Key).\
         self.set_cache(**{key: value})
         self.trigger_build()
 
-    def set_org(self, org: Org) -> None:
+    def set_org(self, org) -> None:
         """Set the organization"""
         if org["uid"] != self.config.org:
             self.set_cache(sources=None)
@@ -886,7 +886,7 @@ arguments (except for the API Key).\
         self.config.org_confirmed = True
         self.trigger_build()
 
-    def set_source(self, source: Source) -> None:
+    def set_source(self, source) -> None:
         """Set the source"""
         self.config.machine = source["uid"]
         self.set_cache(source=source)
