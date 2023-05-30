@@ -34,8 +34,9 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
     handles the sorting, filtering, and display of the records.
     """
 
-    tree: Tree
+    tree: Optional[Tree]
 
+    header_enabled: bool = True
     columns: List[Column] = []
     _rows: List[InternalRow] = []
     _filtered_rows: List[InternalRow] = []
@@ -48,7 +49,11 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
     _horizontal_offset: int = 0
 
     def __init__(
-        self, model: AppModel, tree: Tree, name="Table", parser=ExtendedParser()
+        self,
+        model: AppModel,
+        tree: Optional[Tree],
+        name="Table",
+        parser=ExtendedParser(),
     ):
         super().__init__(
             name, tab_stop=True, disabled=False, on_focus=None, on_blur=None
@@ -89,37 +94,41 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
             self.value = len(self._filtered_rows) - 1
 
         # first, print the header
-        offset = -self._horizontal_offset
-        for col in self.columns:
-            if col.header_name == self._config["sort_column"]:
-                color, attr, background = self._frame.palette.get(
-                    "table_header_selected", self._frame.palette["selected_focus_field"]
-                )
-                arrow = "↑" if self._config["sort_ascending"] else "↓"
-            else:
-                color, attr, background = self._frame.palette.get(
-                    "table_header", self._frame.palette["title"]
-                )
-                arrow = ""
-            width = col.max_width
-            if width == 0:
-                width = max(self._w - offset, 1)
+        if self.header_enabled:
+            offset = -self._horizontal_offset
+            for col in self.columns:
+                if col.header_name == self._config["sort_column"]:
+                    color, attr, background = self._frame.palette.get(
+                        "table_header_selected",
+                        self._frame.palette["selected_focus_field"],
+                    )
+                    arrow = "↑" if self._config["sort_ascending"] else "↓"
+                else:
+                    color, attr, background = self._frame.palette.get(
+                        "table_header", self._frame.palette["title"]
+                    )
+                    arrow = ""
+                width = col.max_width
+                if width == 0:
+                    width = max(self._w - offset, 1)
 
-            assert width > 0
+                assert width > 0
 
-            if col.enabled:
-                self._frame.canvas.paint(
-                    f"{col.header_name+arrow:{col.align}{width}} ",
-                    self._x + offset,
-                    self._y,
-                    color,
-                    attr,
-                    background,
-                )
-                offset += width + 1
+                if col.enabled:
+                    self._frame.canvas.paint(
+                        f"{col.header_name+arrow:{col.align}{width}} ",
+                        self._x + offset,
+                        self._y,
+                        color,
+                        attr,
+                        background,
+                    )
+                    offset += width + 1
+            y_offset = 1
+        else:
+            y_offset = 0
 
         # then, print the rows
-        y_offset = 1
         for i in range(self._vertical_offset, self._vertical_offset + self._h - 1):
             if i >= len(self._filtered_rows) or i < 0:
                 break
@@ -282,7 +291,8 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
             for row in self._rows:
                 sortable[row[1][0]] = row
 
-            self._tree_rows = self._sort_level(self.tree, sortable, 0, [])
+            if self.tree is not None:
+                self._tree_rows = self._sort_level(self.tree, sortable, 0, [])
         else:
             self._rows = self._simple_sort(self._rows)
         self.do_filter()

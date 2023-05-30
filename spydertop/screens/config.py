@@ -21,12 +21,10 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 import yaml
 from asciimatics.widgets import (
     Frame,
-    MultiColumnListBox,
     Text,
     Layout,
     Button,
     Label,
-    Widget,
     DatePicker,
     TimePicker,
     CheckBox,
@@ -36,6 +34,7 @@ from asciimatics.event import KeyboardEvent
 from asciimatics.exceptions import NextScene, StopApplication
 
 from spydertop.config import Config
+from spydertop.constants.columns import Column
 from spydertop.model import AppModel
 from spydertop.widgets import FuncLabel, Padding
 from spydertop.utils import (
@@ -44,7 +43,7 @@ from spydertop.utils import (
     log,
 )
 from spydertop.constants import API_LOG_TYPES, COLOR_REGEX
-from spydertop.utils.types import ExtendedParser
+from spydertop.widgets.table import Table
 
 
 class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
@@ -488,61 +487,58 @@ Once you have a source configured, you can continue.\
     def build_question(  # pylint: disable=too-many-arguments
         self,
         question: str,
-        answers: List[Tuple[List, Callable]],
+        answers: List[Tuple[List[str], Callable]],
         index=0,
         search_string: Optional[str] = None,
         back_button: Optional[Callable] = None,
     ) -> None:
         """Construct a layout that asks a question and has a set of answers, making use of the
         multi-column list box widget."""
-
         # create column widths
         columns = [0] * len(answers[0][0])
-        for answer in answers:
+        # we ignore any more than the first 100 answers to avoid
+        # taking too long to calculate the column widths
+        for answer in answers[:100]:
             for i in range(len(answer[0])):
                 columns[i] = max(columns[i], len(answer[0][i]) + 1)
-        columns = [min(c, 40) for c in columns]
+        columns = [Column("", min(c, 40), str) for c in columns]
+        columns[-1].max_width = 0
 
-        list_box = MultiColumnListBox(
-            Widget.FILL_FRAME,
-            columns,
-            [(x[0], i) for i, x in enumerate(answers)],
-            parser=ExtendedParser(),
-            name="selection",
-        )
+        # list_box = MultiColumnListBox(
+        #     Widget.FILL_FRAME,
+        #     columns,
+        #     [(x[0], i) for i, x in enumerate(answers)],
+        #     parser=ExtendedParser(),
+        #     name="selection",
+        # )
+        list_box = Table(self.model, None, "selection")
+        list_box.header_enabled = False
         list_box.value = index
-        list_box.start_line = 0
+        list_box.columns = columns
+        options = [x[0] for x in answers]
+        list_box.set_rows(options, options)
+        # list_box.start_line = 0
         text_input = None
 
         def on_search():
             if text_input is None:
                 return
-            new_options = [
-                (line[0], i)
-                for i, line in enumerate(answers)
-                if (
-                    text_input.value.lower() in " ".join(line[0]).lower()
-                    or fnmatch.fnmatch(
-                        text_input.value.lower(), "".join(line[0]).lower()
-                    )
-                )
-            ]
-            list_box.options = new_options
+            self.model.config["filter"] = text_input.value
+            list_box.do_filter()
 
         text_input = Text(on_change=on_search, name="search")
         if search_string is not None:
             text_input.value = search_string
 
-        self._on_submit = (
-            lambda: answers[list_box.value][1]()
-            if list_box.value is not None
-            else (
-                self.set_cache(
-                    notification="No option was selected, please select one"
-                ),
-                self.trigger_build(),
-            )
-        )
+        def on_submit():
+            if list_box.value is not None:
+                self.model.config["filter"] = None
+                answers[list_box.value][1]()
+            else:
+                self.set_cache(notification="No option was selected, please select one")
+                self.trigger_build()
+
+        self._on_submit = on_submit
 
         self.layout.add_widget(Label(question, align="^"), 1)
         self.layout.add_widget(Label("Search:", align="<"), 1)
