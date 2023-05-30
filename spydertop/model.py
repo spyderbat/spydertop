@@ -248,11 +248,11 @@ not enough information could be loaded.\
             )
         return branch  # type: ignore
 
-    def get_orgs(self) -> Optional[List[dict]]:
+    def get_orgs(self, force_reload: bool = False) -> Optional[List[dict]]:
         """Fetch a list of organization for this api_key"""
-        if len(self._record_pool.orgs) == 0:
+        if len(self._record_pool.orgs) == 0 or force_reload:
             try:
-                self._record_pool.load_orgs()
+                self._record_pool.load_orgs(force_reload)
                 self.log_api(
                     API_LOG_TYPES["orgs"], {"count": len(self._record_pool.orgs)}
                 )
@@ -270,13 +270,16 @@ not enough information could be loaded.\
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         uid: Optional[str] = None,
+        force_reload: bool = False,
     ) -> Optional[List[dict]]:
         """Fetch a list of sources for this api_key"""
         if self.config.org is None:
             return None
-        if self._record_pool.sources.get(self.config.org) is None:
+        if self._record_pool.sources.get(self.config.org) is None or force_reload:
             try:
-                self._record_pool.load_sources(self.config.org, page, page_size, uid)
+                self._record_pool.load_sources(
+                    self.config.org, page, page_size, uid, force_reload
+                )
                 if self._record_pool.sources.get(self.config.org) is not None:
                     self.log_api(
                         API_LOG_TYPES["sources"],
@@ -291,13 +294,13 @@ not enough information could be loaded.\
                 log.traceback(exc)
         return self._record_pool.sources.get(self.config.org)
 
-    def get_clusters(self) -> Optional[List[dict]]:
+    def get_clusters(self, force_reload: bool = False) -> Optional[List[dict]]:
         """Fetch a list of clusters for this api_key"""
         if self.config.org is None:
             return None
-        if self._record_pool.clusters.get(self.config.org) is None:
+        if self._record_pool.clusters.get(self.config.org) is None or force_reload:
             try:
-                self._record_pool.load_clusters(self.config.org)
+                self._record_pool.load_clusters(self.config.org, force_reload)
                 if self._record_pool.clusters.get(self.config.org) is not None:
                     self.log_api(
                         API_LOG_TYPES["clusters"],

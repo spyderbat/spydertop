@@ -79,6 +79,7 @@ class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
                 "sources": None,  # Optional[List]
                 "source_glob": None,  # Optional[str]
                 "looking_for_sources": False,  # bool
+                "force_reload": False,  # bool
                 "needs_saving": False,  # bool
                 "created_account": False,  # bool
                 "notification": None,  # Optional[str]
@@ -221,7 +222,7 @@ repository) like so:
             if self.cache["orgs"] is None:
 
                 def load_orgs():
-                    orgs = self.model.get_orgs()
+                    orgs = self.model.get_orgs(force_reload=self.cache["force_reload"])
                     if orgs is not None:
                         self.set_cache(
                             orgs=[
@@ -233,6 +234,7 @@ repository) like so:
                         )
                     self.trigger_build()
                     self._screen.force_update()
+                    self.set_cache(force_reload=False)
 
                 self.thread = Thread(target=load_orgs)
                 self.thread.start()
@@ -266,6 +268,13 @@ logging into your account on the website.\
                         except ValueError:
                             index = 0
 
+                    def reload_orgs():
+                        self.set_cache(force_reload=True)
+                        self.org_confirmed = False
+                        self.set_cache(orgs=None)
+                        self._on_submit = None
+                        self.trigger_build()
+
                     self.build_question(
                         "Please select an organization",
                         [
@@ -284,6 +293,7 @@ logging into your account on the website.\
                             for org in orgs
                         ],
                         index,
+                        refresh_button=reload_orgs,
                     )
                     return
 
@@ -307,8 +317,13 @@ logging into your account on the website.\
             if self.cache["sources"] is None:
 
                 def load_sources():
-                    sources = self.model.get_sources()
-                    clusters = self.model.get_clusters()
+                    sources = self.model.get_sources(
+                        force_reload=self.cache["force_reload"]
+                    )
+                    clusters = self.model.get_clusters(
+                        force_reload=self.cache["force_reload"]
+                    )
+                    self.set_cache(force_reload=False)
                     if sources is None and clusters is None:
                         self.model.fail("Failed to load any machines or clusters")
                         self.trigger_build()
@@ -405,6 +420,13 @@ Once you have a source configured, you can continue.\
                     self._on_submit = None
                     self.trigger_build()
 
+                def refresh_handler():
+                    self.set_cache(force_reload=True)
+                    self.config.source_confirmed = False
+                    self.set_cache(sources=None)
+                    self._on_submit = None
+                    self.trigger_build()
+
                 # there is no org selection to go back to if
                 # the user is in only one org
                 if self.cache["orgs"] and len(self.cache["orgs"]) == 1:
@@ -458,6 +480,7 @@ Once you have a source configured, you can continue.\
                     index,
                     self.cache["source_glob"],
                     back,
+                    refresh_handler,
                 )
                 return
 
@@ -491,6 +514,7 @@ Once you have a source configured, you can continue.\
         index=0,
         search_string: Optional[str] = None,
         back_button: Optional[Callable] = None,
+        refresh_button: Optional[Callable] = None,
     ) -> None:
         """Construct a layout that asks a question and has a set of answers, making use of the
         multi-column list box widget."""
@@ -545,6 +569,9 @@ Once you have a source configured, you can continue.\
         self.layout.add_widget(text_input, 1)
         self.layout.add_widget(Padding(), 1)
         self.layout.add_widget(list_box, 1)
+        if refresh_button is not None:
+            self.layout.add_widget(Button("Refresh", refresh_button), 1)
+            self.layout.add_widget(Padding(), 1)
         self.footer.add_widget(
             Button(
                 "Continue",
