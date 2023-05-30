@@ -175,6 +175,7 @@ class DelayedLog:
         self.logger = logging.getLogger("spydertop")
         # disable noisy logging for asciimatics
         logging.getLogger("asciimatics").setLevel(logging.WARNING)
+        self.log(f"Setting log level to {self.log_level}")
 
     def dump(self):
         """Print all logs to the console."""

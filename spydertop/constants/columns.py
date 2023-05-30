@@ -13,7 +13,8 @@ The Column class is used to define the columns that are displayed in the table.
 """
 
 from datetime import datetime, timedelta, timezone
-import json
+import orjson as json
+from time import perf_counter_ns
 from typing import Any, Dict, List, Optional, Type, Callable, TYPE_CHECKING
 
 from spydertop.utils import (
@@ -163,7 +164,14 @@ def color_cmd(_m, process: Record, args: List[str]):
 
 def format_environ(_m, _p, environ: Dict[str, str]):
     """Format the environment of a process"""
-    environ_lines = json.dumps(environ, indent=4, sort_keys=True).split("\n")
+    start = perf_counter_ns()
+    environ_lines = (
+        json.dumps(environ, option=json.OPT_INDENT_2 | json.OPT_SORT_KEYS)
+        .decode()
+        .split("\n")
+    )
+    end = perf_counter_ns()
+    log.log(f"Formatting environ took {(end - start) / 1e6} ms")
     if len(environ_lines) > 10:
         environ_lines = environ_lines[:9] + ["    ... <remaining values hidden>"]
     return "\n".join(environ_lines)

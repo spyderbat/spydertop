@@ -13,6 +13,9 @@ platform = "All"
 useLibraryCodeForTypes = true
 # pythonVersion = "3.7"
 
+[tool.pylint.typecheck]
+generated-members = ["orjson.*"]
+
 [project]
 name = "spydertop"
 description = "A tool that provides htop-like functionality for any point in time."
@@ -34,6 +37,7 @@ dependencies = [
     "pyyaml",
     "pyperclip",
     "urllib3",
+    "orjson",
     "importlib-metadata >= 1.0; python_version < \"3.8\"",
 ]
 dynamic = ["version"]

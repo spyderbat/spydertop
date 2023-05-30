@@ -15,7 +15,7 @@ import asyncio
 from collections import defaultdict
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import timedelta
-import json
+import orjson as json
 import multiprocessing
 from time import perf_counter_ns
 from typing import DefaultDict, Dict, List, Optional, Union
@@ -153,12 +153,15 @@ No more records can be loaded."
             self._process_records(lines, 1.0)
 
         if self._config.output:
+            start = perf_counter_ns()
             lines = [
-                json.dumps(record)
+                json.dumps(record).decode()
                 for group in self.records.values()
                 for record in group.values()
             ]
-            self._config.output.write("\n".join([l.rstrip() for l in lines]))
+            end = perf_counter_ns()
+            log.log(f"Dumping records took: {(end - start) / 1e9} seconds")
+            self._config.output.writelines(lines)
 
     def _process_records(
         self,
@@ -181,6 +184,7 @@ No more records can be loaded."
 
         # translate the lines from json to a dict in parallel
 
+        start = perf_counter_ns()
         # for some reason, forking seems to break stdin/out in some cases
         if parallel:
             multiprocessing.set_start_method("spawn")
@@ -188,6 +192,8 @@ No more records can be loaded."
                 records = pool.map(json.loads, lines)
         else:
             records = [json.loads(line) for line in lines]
+        end = perf_counter_ns()
+        log.log(f"Finished parsing records in {(end - start) / 1e9} seconds")
 
         self.progress += 0.5 * progress_increase
 
@@ -216,7 +222,10 @@ No more records can be loaded."
         """Fetch a list of organization for this api_key"""
 
         orgs = self.guard_api_call(method="GET", url="/api/v1/org/")
+        start = perf_counter_ns()
         orgs = json.loads(orgs)
+        end = perf_counter_ns()
+        log.log(f"Finished parsing orgs in {(end - start) / 1e9} seconds")
         self.orgs = orgs
 
     def load_sources(
@@ -244,7 +253,10 @@ No more records can be loaded."
             org_uid=self._config.org,
             **kwargs,
         )
+        start = perf_counter_ns()
         sources: List = json.loads(raw_sources)
+        end = perf_counter_ns()
+        log.log(f"Finished parsing sources in {(end - start) / 1e9} seconds")
 
         if len(sources) > 0:
             self.sources[org_uid] = sources
@@ -256,7 +268,10 @@ No more records can be loaded."
             f"/api/v1/org/{org_uid}/cluster/",
         )
         # parse the response
+        start = perf_counter_ns()
         self.clusters[org_uid] = json.loads(response)
+        end = perf_counter_ns()
+        log.log(f"Finished parsing clusters in {(end - start) / 1e9} seconds")
 
     def guard_api_call(self, method: str, url: str, **input_data) -> bytes:
         """Calls the api with the given arguments, properly handling any errors
@@ -277,7 +292,7 @@ No more records can be loaded."
                 method,
                 url=self._config.input + url,
                 headers=headers,
-                body=(json.dumps(input_data).encode() if method == "POST" else None),
+                body=(json.dumps(input_data) if method == "POST" else None),
             )
             newline = b"\n"
             log.debug(

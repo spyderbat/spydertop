@@ -12,7 +12,7 @@ to fetch and cache data from the Spyderbat API
 
 from itertools import groupby
 import threading
-import json
+import orjson as json
 import gzip
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, Optional, List, Any, Tuple
