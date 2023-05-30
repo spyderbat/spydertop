@@ -112,7 +112,6 @@ ${{{label},1}}        l:${{{background}}} switch to listening tab\
                     model,
                 ),
                 parser=ExtendedParser(),
-                align="<",
             )
         )
 
@@ -139,7 +138,6 @@ ${{{label},1}}     {{ }}:${{{background}}} move forward/backward 1 min\
                     model,
                 ),
                 parser=ExtendedParser(),
-                align="<",
             ),
             column=1,
         )
@@ -177,7 +175,6 @@ Filter: ${{{label}, 1}}user: !root res:>100e6 opt${{{label}}}\
                     model,
                 ),
                 parser=ExtendedParser(),
-                align="<",
             )
         )
 

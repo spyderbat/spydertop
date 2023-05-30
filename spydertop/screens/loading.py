@@ -17,7 +17,8 @@ from asciimatics.event import KeyboardEvent
 from spydertop.model import AppModel
 
 from spydertop.constants import COLOR_REGEX
-from spydertop.utils.types import ExtendedParser
+from spydertop.utils import log
+from spydertop.utils.types import Alignment, ExtendedParser
 from spydertop.widgets import FuncLabel
 
 LOGO = """\
@@ -80,7 +81,7 @@ class LoadingFrame(Frame):
         layout.add_widget(
             FuncLabel(
                 self.update_logo,
-                align="^",
+                align=Alignment.CENTER,
                 parser=ExtendedParser(),
                 drop_whitespace=False,
             )
@@ -97,16 +98,14 @@ class LoadingFrame(Frame):
                 + f"${{8}}]${{-1}} {round(self._model.progress*100,1):>5}%"
             )
 
-        self._label = FuncLabel(update_bar, align="^", parser=ExtendedParser())
+        self._label = FuncLabel(
+            update_bar, align=Alignment.CENTER, parser=ExtendedParser()
+        )
         layout.add_widget(self._label)
         layout.add_widget(
             FuncLabel(
-                lambda: "${8,1}Loading time " + str(model.time)
-                if model.time is not None
-                else "${8,1}Loading from " + model.config.input.name
-                if not isinstance(model.config.input, str)
-                else "${8,1}Loading from " + model.config.input,
-                align="^",
+                lambda: "${8,1} " + log.get_last_line(log.INFO),
+                align=Alignment.CENTER,
                 parser=ExtendedParser(),
             )
         )

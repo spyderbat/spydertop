@@ -19,9 +19,9 @@ from asciimatics.widgets import Widget
 from asciimatics.parsers import Parser
 from asciimatics.strings import ColouredText
 from spydertop.constants.columns import Column
+from spydertop.utils import align_with_overflow
 
-from spydertop.utils.types import Alignment, ExtendedParser
-from spydertop.constants import COLOR_REGEX
+from spydertop.utils.types import ExtendedParser
 from spydertop.model import AppModel, Tree
 from spydertop.config import Config
 
@@ -147,23 +147,11 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                     line = str(displayable_row[j]).replace("\n", " ")
                     # first, the space needed to pad the text to the correct alignment
                     # is calculated.
-                    extra_space = width - len(re.sub(COLOR_REGEX, "", str(line)))
-                    left_space = (
-                        0
-                        if col.align == Alignment.LEFT
-                        else extra_space // 2
-                        if col.align == Alignment.CENTER
-                        else extra_space
-                    )
-                    spaces = " " * left_space
-                    right_spaces = " " * (extra_space - left_space + 1)
-                    line = f"{spaces}{line}{right_spaces}"
+                    line = align_with_overflow(line, width, col.align)
                     # then, colors are added if needed.
                     line = ColouredText(line, self._parser) if self._parser else line
 
                     to_paint = str(line)
-                    if extra_space < 0:
-                        to_paint = to_paint[: width - 1] + "…"
                     # finally, the line is painted.
                     self._frame.canvas.paint(
                         to_paint + " ",

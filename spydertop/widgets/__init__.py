@@ -16,7 +16,7 @@ from asciimatics.widgets import Widget
 from asciimatics.parsers import Parser
 from asciimatics.strings import ColouredText
 
-from spydertop.utils.types import CustomTextWrapper
+from spydertop.utils.types import Alignment, CustomTextWrapper
 from spydertop.constants import COLOR_REGEX
 
 # reexports
@@ -67,7 +67,7 @@ class FuncLabel(Widget):
     """
 
     parser: Optional[Parser]
-    align: str
+    align: Alignment
     generator: Callable[[], str]
     color: str
     indent: str
@@ -75,7 +75,7 @@ class FuncLabel(Widget):
     def __init__(
         self,
         generator: Callable[[], str],
-        align="<",
+        align: Alignment = Alignment.LEFT,
         parser=None,
         name=None,
         color="label",
@@ -136,9 +136,9 @@ class FuncLabel(Widget):
                 extra_space = self._w - len(re.sub(COLOR_REGEX, "", line))
                 left_space = (
                     0
-                    if self.align == "<"
+                    if self.align == Alignment.LEFT
                     else extra_space // 2
-                    if self.align == "^"
+                    if self.align == Alignment.CENTER
                     else extra_space
                 )
                 spaces = " " * left_space

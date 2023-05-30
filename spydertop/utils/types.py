@@ -10,7 +10,7 @@ Custom or modified types for use in the application.
 """
 
 import bisect
-import datetime
+from datetime import datetime
 from enum import Enum
 import re
 from textwrap import TextWrapper
@@ -148,7 +148,7 @@ class DelayedLog:
     interfere with any normal logging method.
     """
 
-    _logs: List[Tuple[int, str]] = []
+    _logs: List[Tuple[int, str, datetime]] = []
     log_level: int
     logger: Optional[logging.Logger] = None
 
@@ -173,30 +173,31 @@ class DelayedLog:
         """Initialize logging for development purposes, saving to a file."""
         logging.basicConfig(level=self.log_level, filename="spydertop.log")
         self.logger = logging.getLogger("spydertop")
+        # disable noisy logging for asciimatics
+        logging.getLogger("asciimatics").setLevel(logging.WARNING)
 
     def dump(self):
         """Print all logs to the console."""
-        for level, log_lines in self._logs:
-            for line in log_lines.split("\n"):
-                click.echo(
-                    click.style(
-                        f"[{logging.getLevelName(level)}]".ljust(10),
-                        fg=self.LOG_COLORS.get(level, None),
-                    ),
-                    nl=False,
-                )
-                click.echo(line)
+        for level, log_lines, time in self._logs:
+            if level >= self.log_level:
+                for line in log_lines.split("\n"):
+                    click.echo(
+                        click.style(
+                            f"[{logging.getLevelName(level)}]".ljust(9),
+                            fg=self.LOG_COLORS.get(level, None),
+                        ),
+                        nl=False,
+                    )
+                    click.echo(time.strftime("%H:%M:%S") + " " + line)
         self._logs = []
 
     def log(self, *messages: Any, log_level: int = logging.NOTSET):
         """Log a message to the console, by default at DEBUG level."""
-        line = f"{datetime.datetime.now().timestamp():.3f}: " + " ".join(
-            [str(_) for _ in messages]
-        )
+        line = " ".join([str(_) for _ in messages])
+        time = datetime.now()
         if self.logger is not None:
-            self.logger.log(log_level, line)
-        if log_level >= self.log_level:
-            self._logs.append((log_level, line))
+            self.logger.log(log_level, "%.3f %s", time.timestamp(), line)
+        self._logs.append((log_level, line, time))
 
     def debug(self, *messages: Any):
         """Log an info message to the console."""
@@ -228,10 +229,14 @@ class DelayedLog:
     def __del__(self):
         self.dump()
 
-    @property
-    def lines(self) -> List[str]:
+    def get_last_line(self, log_level: Optional[int] = None) -> str:
         """All logs within the log level as a list"""
-        return [line for level, line in self._logs if level >= self.log_level]
+        if log_level is None:
+            log_level = self.log_level
+        filtered_logs = [line for level, line, _ in self._logs if level >= log_level]
+        if filtered_logs:
+            return filtered_logs[-1]
+        return ""
 
 
 class CustomTextWrapper(TextWrapper):

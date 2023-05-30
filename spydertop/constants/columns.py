@@ -113,8 +113,8 @@ def get_cpu_per(model: AppModel, process: Record):
     prev_record = get_resource_record(model, process, previous=True)
     if record is None or prev_record is None:
         return None
-    time_delta = model.time_elapsed
-    clk_tck = model.get_value("clk_tck")
+    time_delta = model.get_time_elapsed(muid=process["muid"])
+    clk_tck = model.get_value("clk_tck", muid=process["muid"])
     cpu = (
         record["utime"] - prev_record["utime"] + record["stime"] - prev_record["stime"]
     )
@@ -144,7 +144,7 @@ def get_time_plus_value(model: AppModel, process: Record):
     record = get_resource_record(model, process)
     if record is None:
         return None
-    clk_tck = model.get_value("clk_tck")
+    clk_tck = model.get_value("clk_tck", muid=process["muid"])
     cpu = record["utime"] + record["stime"]
     time = cpu / clk_tck
     return timedelta(seconds=time)
@@ -183,7 +183,7 @@ def get_resource_record(
     model: AppModel, process_record: Record, previous=False
 ) -> Optional[Record]:
     """Returns the resource record for the process"""
-    process_table = model.get_value("processes", previous)
+    process_table = model.get_value("processes", process_record["muid"], previous)
     if process_table is None:
         return None
     default_values = process_table["default"]
@@ -199,6 +199,7 @@ PROCESS_COLUMNS = [
     Column("NAME", 15, str, enabled=False),
     Column("PPID", 7, int, enabled=False),
     Column("PID", 7, int),
+    Column("MUID", 16, str, enabled=False),
     Column(
         "USER",
         9,
@@ -582,8 +583,8 @@ LISTENING_SOCKET_COLUMNS = [
 def get_system(model: AppModel, cont: Record) -> Optional[str]:
     """Get the system name for a container."""
     muid = cont["muid"]
-    machine_rec = model.machine
-    if machine_rec is not None and muid == machine_rec["id"]:
+    machine_rec = model.machines[muid]
+    if machine_rec is not None:
         return machine_rec["hostname"]
     return None
 

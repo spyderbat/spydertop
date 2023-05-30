@@ -418,8 +418,8 @@ Once you have a source configured, you can continue.\
                     [
                         (
                             [
-                                "Cluster:",
-                                cluster.get("name", ""),
+                                "${4}Cluster:",
+                                cluster.get("name", "<No Name>"),
                                 " ",
                                 pretty_datetime(
                                     datetime.strptime(
@@ -443,7 +443,11 @@ Once you have a source configured, you can continue.\
                             ],
                             lambda c=cluster: self.set_source(c),
                         )
-                        for cluster in self.cache["clusters"]
+                        for cluster in sorted(
+                            self.cache["clusters"],
+                            key=lambda c: c.get("last_data", 0),
+                            reverse=True,
+                        )
                     ]
                     + [
                         (
@@ -559,7 +563,7 @@ Once you have a source configured, you can continue.\
 
     def build_instructions(self, instructions: str, callback: Callable) -> None:
         """Construct a layout that displays instructions and waits for user to continue"""
-        self.layout.add_widget(FuncLabel(lambda: instructions, align="<"), 1)
+        self.layout.add_widget(FuncLabel(lambda: instructions), 1)
         self.layout.add_widget(Padding(), 1)
         self.footer.add_widget(
             Button("Continue", lambda: (callback(), self.trigger_build())), 1
@@ -577,7 +581,6 @@ You can find this by clicking on the account icon in the top right of the Spyder
 and clicking on 'API Keys'. If you don't have an API key, you can then create one by \
 clicking on 'Create API Key'.\
 """,
-                align="<",
             ),
             1,
         )
@@ -617,7 +620,6 @@ clicking on 'Create API Key'.\
 Please select a start time. This can also be passed as a command line argument; \
 see the help page for more information.\
 """,
-                align="<",
             ),
             1,
         )
@@ -766,7 +768,6 @@ again the next time you start Spydertop, and will skip this configuration menu.
 These are default values, and can be overridden by passing them as command line \
 arguments (except for the API Key).\
 """,
-                align="<",
             ),
             1,
         )
@@ -863,7 +864,7 @@ arguments (except for the API Key).\
         except OverflowError:
             last_stored_time = datetime.fromtimestamp(0).replace(tzinfo=timezone.utc)
         return [
-            "Machine:",
+            "${3}Machine:",
             source.get("description", ""),
             " ",
             pretty_datetime(last_stored_time)

@@ -10,19 +10,19 @@ The main app model for the application, containing all logic necessary
 to fetch and cache data from the Spyderbat API
 """
 
+from itertools import groupby
 import threading
 import json
 import gzip
-from math import nan
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Dict, Optional, List, Any, Tuple, Union
+from typing import Callable, Dict, Optional, List, Any, Tuple
 import uuid
 
 import urllib3
 
 from spydertop.config import Config
 from spydertop.recordpool import RecordPool
-from spydertop.utils import get_timezone, log
+from spydertop.utils import get_timezone, log, sum_element_wise
 from spydertop.utils.types import APIError, Record, Tree
 from spydertop.utils.cursorlist import CursorList
 from spydertop.constants import API_LOG_TYPES
@@ -40,13 +40,13 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
     config: Config
     columns_changed: bool = False
     thread: Optional[threading.Thread] = None
+    selected_machine: Optional[str] = None
 
     # cache for arbitrary states, registered through
     # register_state
     _cache: Dict[str, Dict[str, Any]] = {}
 
-    _timestamp: Optional[float]
-    _time_elapsed: float = 0
+    _timestamp: Optional[float] = None
     _last_good_timestamp: Optional[float] = None
     _session_id: str
     _http_client: urllib3.PoolManager
@@ -54,24 +54,21 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
     _record_pool: RecordPool
 
     _tree: Optional[Tree] = None
-    _tops: CursorList
-    _machine: Optional[Record] = None
-    _meminfo: Optional[Dict[str, int]] = None
+    # the event_top records grouped by machine
+    _tops: Dict[str, CursorList] = {}
+    # memory information for the current time, grouped by machine
+    # meminfo may not be available for every time
+    _meminfo: Dict[str, Optional[Dict[str, int]]] = {}
 
     def __init__(self, config: Config) -> None:
         self.config = config
-        self._timestamp = None
         self._session_id = uuid.uuid4().hex
         self._http_client = urllib3.PoolManager()
         self._record_pool = RecordPool(config)
 
-        self._tops = CursorList("time", [], self._timestamp)
-
     def __del__(self):
         if self.thread:
             self.thread.join()
-        # if self.api_client:
-        #     self.api_client.close()
 
     def init(self) -> None:
         """Initialize the model, loading data from the source. Requires config to be complete"""
@@ -86,7 +83,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
         if not self.config.is_complete:
             # ideally, this would never happen, as the configuration screen
             # should complete the configuration before the model is initialized
-            raise Exception("Configuration is incomplete, cannot load data")
+            raise RuntimeError("Configuration is incomplete, cannot load data")
 
         def guard():
             try:
@@ -115,10 +112,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
     ) -> None:
         """Load data from the source, either the API or a file, then process it"""
         try:
-            n_lines = self._record_pool.load(timestamp, duration, before)
-            self.log_api(
-                API_LOG_TYPES["loaded_data"], {"source_id": "file", "count": n_lines}
-            )
+            self._record_pool.load(timestamp, duration, before)
             log.log(
                 [
                     f"{key}: {len(value)}"
@@ -129,12 +123,20 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
             log.traceback(exc)
             self.fail(str(exc))
             return
+        except Exception as exc:  # pylint: disable=broad-except
+            # fallback case; we don't want to crash the app if something
+            # unexpected happens
+            log.warn("An unexpected type of exception occurred while loading data")
+            log.traceback(exc)
+            self.fail(str(exc))
+            return
 
-        self._tops = CursorList(
-            "time",
-            list(self._record_pool.records["event_top_data"].values()),
-            self._timestamp,
-        )
+        event_top_data = self._record_pool.records["event_top_data"].values()
+        event_top_data = groupby(event_top_data, lambda record: record["muid"])
+        self._tops = {
+            muid: CursorList("time", list(records), self._timestamp)
+            for muid, records in event_top_data
+        }
 
         self.rebuild_tree()
 
@@ -148,10 +150,11 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
         # previous time that has memory information
         new_meminfo = None
         index = 0
-        while not new_meminfo and self._tops.is_valid(index):
-            new_meminfo = self._tops[index]["memory"]
-            index -= 1
-        self._meminfo = new_meminfo
+        for muid, cursorlist in self._tops.items():
+            while not new_meminfo and cursorlist.is_valid(index):
+                new_meminfo = cursorlist[index]["memory"]
+                index -= 1
+            self._meminfo[muid] = new_meminfo
 
     def _fix_state(self) -> None:
         """
@@ -161,7 +164,8 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
             - updating the machine
         """
         try:
-            self._tops.update_cursor(self._timestamp)
+            for c_list in self._tops.values():
+                c_list.update_cursor(self._timestamp)
             # if the time is None, there was no specified time, so
             # go back to the beginning of the records
             if self._timestamp is None:
@@ -206,25 +210,18 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
             # correct the memory information
             self._correct_meminfo()
 
-            if self._tops.is_valid(0) and self._tops.is_valid(-1):
-                # update the time elapsed
-                self._time_elapsed = float(self._tops[0]["time"]) - float(
-                    self._tops[-1]["time"]
-                )
-            else:
-                self._time_elapsed = nan
-
             # update the machine
-            # there should only be one machine, so we can just use the first one
+            # there will usually only be one machine, so we can just use the first one
             if len(self._record_pool.records["model_machine"]) == 0:
-                log.warn("No machine found in the records")
-                self._machine = None
+                log.warn("No machines found in the records")
+                self.selected_machine = None
             else:
-                self._machine = list(
-                    self._record_pool.records["model_machine"].values()
+                self.selected_machine = list(
+                    self._record_pool.records["model_machine"].keys()
                 )[0]
             if len(self._record_pool.records["model_machine"]) > 1:
-                log.warn("More than one machine was found in the input data.")
+                # the user will have to select a machine later
+                self.selected_machine = None
 
         except Exception as exc:  # pylint: disable=broad-except
             log.err("Exception occurred while fixing state:")
@@ -321,7 +318,6 @@ not enough information could be loaded.\
         }
 
         log.debug(f"Sending API log: {new_data}")
-        return
 
         try:
             headers = {
@@ -351,23 +347,36 @@ not enough information could be loaded.\
         self.log_api(API_LOG_TYPES["feedback"], {"message": feedback})
         self.config["has_submitted_feedback"] = True
 
-    def get_value(self, key, previous=False) -> Any:
+    def get_value(self, key, muid: Optional[str], previous=False) -> Any:
         """Provides the specified field on the most recent or the previous
-        event_top_data record"""
+        event_top_data record. If `muid` is None, the selected machine is used,
+        and if that is None, the value is summed across all machines."""
         index = 0 if not previous else -1
-        if not self.tops_valid():
-            return None
-        return self._tops[index][key]
+        muid = muid or self.selected_machine
+        if muid is not None:
+            if not self.tops_valid():
+                return None
+            return self._tops[muid][index][key]
+        return sum_element_wise(c_list[index][key] for c_list in self._tops.values())
+
+    def get_time_elapsed(self, muid: str) -> float:
+        """Get the time elapsed since the last event_top_data record for
+        the specified machine."""
+        if not self.tops_valid(muid):
+            return 0
+        return float(self._tops[muid][0]["time"]) - float(self._tops[muid][-1]["time"])
 
     def get_top_processes(
         self,
-    ) -> Tuple[
-        Optional[Dict[str, Union[str, int]]], Optional[Dict[str, Union[str, int]]]
-    ]:
+    ) -> Dict[str, Tuple]:
         """Get the resource usage records for the processes at the current time"""
-        if not self.tops_valid():
-            return None, None
-        return (self._tops[-1]["processes"], self._tops[0]["processes"])
+        process_map = {}
+
+        for muid, c_list in self._tops.items():
+            if self.tops_valid(muid):
+                process_map[muid] = (c_list[-1]["processes"], c_list[0]["processes"])
+
+        return process_map
 
     def rebuild_tree(self) -> None:
         """Create a tree structure for the processes, based on the puid and ppuid"""
@@ -414,7 +423,7 @@ not enough information could be loaded.\
             )
             self._tree[init] = (True, self._tree[init][1])
 
-    def recover(self, method="revert") -> None:
+    def recover(self, method="revert") -> None:  # pylint: disable=too-many-branches
         """Recover the state of the model, using the given method.
         The method can be one of:
             - "revert": revert to the last loaded time
@@ -440,14 +449,21 @@ not enough information could be loaded.\
                 log.info("Reloading from beginning of records.")
                 index = 1  # make sure there is a previous index
                 new_meminfo = None
-                while not new_meminfo and index < len(self._tops.data):
-                    new_meminfo = self._tops.data[index]["memory"]
-                    index += 1
-                if index < len(self._tops.data):
-                    self.timestamp = self._tops.data[index]["time"]
-                elif len(self._tops.data) > 0:
-                    self.timestamp = self._tops.data[0]["time"]
-                self._meminfo = new_meminfo
+                muid = self.selected_machine or (
+                    list(self._tops.keys())[0] if len(self._tops) > 0 else None
+                )
+                if muid is not None:
+                    c_list = self._tops[muid]
+                    while not new_meminfo and index < len(c_list.data):
+                        new_meminfo = c_list.data[index]["memory"]
+                        index += 1
+                    if index < len(c_list.data):
+                        self.timestamp = c_list.data[index]["time"]
+                    elif len(c_list.data) > 0:
+                        self.timestamp = c_list.data[0]["time"]
+                    self._correct_meminfo()
+                else:
+                    log.warn("No machine available to reload from.")
 
             elif method == "retry":
                 log.info("Retrying loading from the API.")
@@ -463,9 +479,8 @@ not enough information could be loaded.\
             # sanity check
             if not self.is_valid():
                 self.fail("Recovering failed to find a valid time.")
-                log.debug(
-                    f"Time: {self._tops.cursor}, # of Records: {len(self._tops.data)}"
-                )
+                et_data = self._record_pool.records["event_top_data"]
+                log.debug(f"Time: {self._timestamp}, # of Records: {len(et_data)}")
                 return
 
             self.failed = False
@@ -481,14 +496,19 @@ not enough information could be loaded.\
         self.failed = True
         self.failure_reason = reason
 
-    def tops_valid(self) -> bool:
+    def tops_valid(self, muid: Optional[str] = None) -> bool:
         """Return whether the event top data is valid for this time"""
         # the slowest data should appear is once per 15 seconds
         grace_period = 16
+        if muid is None:
+            for muid_inner in self._tops.keys():
+                if not self.tops_valid(muid_inner):
+                    return False
+            return True
         return (
-            self._tops.is_valid(0)
-            and self._tops.is_valid(-1)
-            and abs(self._tops[0]["time"] - self._timestamp) < grace_period
+            self._tops[muid].is_valid(0)
+            and self._tops[muid].is_valid(-1)
+            and abs(self._tops[muid][0]["time"] - self._timestamp) < grace_period
         )
 
     def use_state(
@@ -519,14 +539,13 @@ not enough information could be loaded.\
     def clear(self) -> None:
         """Remove all loaded data from the model"""
         self._timestamp = None
-        self._time_elapsed = 0
         self._last_good_timestamp = None
         self._record_pool = RecordPool(self.config)
 
         self._tree = None
-        self._tops = CursorList("time", [], self._timestamp)
-        self._machine = None
-        self._meminfo = None
+        self._tops = {}
+        self.selected_machine = None
+        self._meminfo = {}
 
         self.failed = False
         self.failure_reason = ""
@@ -551,31 +570,29 @@ not enough information could be loaded.\
     @property
     def state(self) -> str:
         """The current status of the model"""
-        if log.log_level == log.DEBUG:
+        if log.log_level <= log.DEBUG:
             try:
-                return log.lines[-1]
+                return log.get_last_line()
             except IndexError:
                 pass
         return f"Time: {self.time}"
-
-    @property
-    def time_elapsed(self) -> float:
-        """The time elapsed between the last event_top_data record and the current one"""
-        return (
-            self._time_elapsed if self._time_elapsed != 0 and self.tops_valid() else nan
-        )
 
     @property
     def memory(self) -> Optional[Dict[str, int]]:
         """The most recent memory usage data"""
         if not self.tops_valid():
             return None
-        return self._meminfo
+        if self.selected_machine is not None:
+            return self._meminfo[self.selected_machine]
+        # create a sum of all machines
+        return sum_element_wise(  # type: ignore
+            m for m in self._meminfo.values() if m is not None
+        )
 
     @property
-    def machine(self) -> Optional[Record]:
+    def machines(self) -> Dict[str, Record]:
         """The most recent machine data"""
-        return self._machine
+        return self._record_pool.records["model_machine"]
 
     @property
     def processes(self) -> Dict[str, Record]:
@@ -619,7 +636,7 @@ not enough information could be loaded.\
         }
         """
         if self._tree is None:
-            raise Exception("The tree is not yet loaded.")
+            raise RuntimeError("The tree is not yet loaded.")
         return self._tree
 
     # time properties

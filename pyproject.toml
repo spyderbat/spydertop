@@ -11,6 +11,7 @@ packages = ["spydertop"]
 include = ["spydertop"]
 platform = "All"
 useLibraryCodeForTypes = true
+# pythonVersion = "3.7"
 
 [project]
 name = "spydertop"

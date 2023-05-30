@@ -11,16 +11,17 @@ some of the data management functionality.
 """
 
 
+import asyncio
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import timedelta
 import json
-import threading
-from time import perf_counter
-from typing import DefaultDict, Dict, List, Literal, Optional
+import multiprocessing
+from time import perf_counter_ns
+from typing import DefaultDict, Dict, List, Optional, Union
 
 import urllib3
-from urllib3.exceptions import MaxRetryError, PoolError
+from urllib3.exceptions import MaxRetryError
 
 from spydertop.config import Config
 from spydertop.utils import log
@@ -49,10 +50,6 @@ class RecordPool:
         self.records = defaultdict(lambda: {})
         self._config = config
 
-    # def __del__(self):
-    #     if self._api_client:
-    #         self._api_client.close()
-
     def init_api(self) -> None:
         """Initialize the API client"""
         if isinstance(self._config.input, str) and self._connection_pool is None:
@@ -63,7 +60,7 @@ class RecordPool:
         timestamp: Optional[float],
         duration: Optional[timedelta] = None,
         before=timedelta(seconds=120),
-    ) -> int:
+    ):
         """Load data from the source, either the API or a file, then process it"""
         self.loaded = False
         if duration is None:
@@ -73,7 +70,6 @@ class RecordPool:
         self.progress = 0.0
 
         source = self._config.input
-        lines = []
 
         if isinstance(source, str):
             # url, load data from api
@@ -82,12 +78,12 @@ class RecordPool:
                 raise RuntimeError("No start time specified")
             if not self._config.api_key:
                 raise RuntimeError("No API key specified")
+            assert self._config.machine is not None
 
             input_data = {
                 # request data from a bit earlier, so that the information is properly filled out
                 "start_time": timestamp - before.total_seconds() + 30,
                 "end_time": timestamp + duration.total_seconds(),
-                "src_uid": self._config.machine,
                 "org_uid": self._config.org,
             }
 
@@ -97,30 +93,52 @@ class RecordPool:
                 input_data["start_time"] + 30, input_data["end_time"]
             )
 
-            def call_api(data_type: str):
-                nonlocal lines
+            if self._config.machine.startswith("clus:"):
+                # this is a cluster, so we need to get the k8s data
+                # and then query each node
+                log.info("Loading cluster data")
+                k8s_data = self.guard_api_call(
+                    method="POST",
+                    url="/api/v1/source/query/",
+                    **input_data,
+                    src_uid=self._config.machine,
+                    data_type="k8s",
+                )
+                log.info("Parsing cluster data")
+                self._process_records(k8s_data.split(b"\n"), 0.1, parallel=False)
+                log.info("Loading node data")
+                sources = [
+                    node["muid"] for node in self.records["model_k8s_node"].values()
+                ]
+            else:
+                self.progress = 0.1
+                log.info("Loading machine data")
+                sources = [self._config.machine]
+
+            def call_api(data_type: str, src_id: str):
                 ndjson = self.guard_api_call(
                     method="POST",
                     url="/api/v1/source/query/",
                     **input_data,
+                    src_uid=src_id,
                     data_type=data_type,
                 )
-                lines += ndjson.split(b"\n")
+                return ndjson.split(b"\n")
 
-            threads: list[threading.Thread] = []
-            start = perf_counter()
-            for data_type in ["htop", "k8s", "spydergraph"]:
-                data_t = data_type
-                thread = threading.Thread(target=call_api, args=(data_t,))
-                thread.start()
-                threads.append(thread)
-            for thread in threads:
-                thread.join()
-                self.progress += 1.0 / len(threads)
-                mid: float = perf_counter()
-                log.info(f"Partial API call took {mid - start} seconds")
-            end = perf_counter()
-            log.info(f"API call took {end - start} seconds")
+            async def load():
+                nonlocal lines
+                threads: List[Future[List[bytes]]] = []
+                with ThreadPoolExecutor() as executor:
+                    for source in sources:
+                        for data_type in ["htop", "spydergraph"]:
+                            threads.append(executor.submit(call_api, data_type, source))
+                    for thread in as_completed(threads):
+                        self._process_records(
+                            thread.result(), 0.9 / len(threads), parallel=False
+                        )
+                        await asyncio.sleep(0)  # try to let the UI update
+
+            asyncio.run(load())
         else:
             # file, read in records and parse
             log.info(f"Reading records from input file: {source.name}")
@@ -132,44 +150,49 @@ class RecordPool:
                     "The current time is unloaded, but input is from a file. \
 No more records can be loaded."
                 )
-            # model.log_api(
-            #     API_LOG_TYPES["loaded_data"], {"source_id": "file", "count": len(lines)}
-            # )
+            self._process_records(lines, 1.0)
 
         if self._config.output:
-            # if lines is still binary, convert to text
-            if len(lines) > 0 and isinstance(lines[0], bytes):
-                lines = [line.decode("utf-8") for line in lines]  # type: ignore
+            lines = [
+                json.dumps(record)
+                for group in self.records.values()
+                for record in group.values()
+            ]
             self._config.output.write("\n".join([l.rstrip() for l in lines]))
 
-        start = perf_counter()
-        self._process_records(lines)
-        end = perf_counter()
-        log.info(f"Processing records took {end - start} seconds")
-        return len(lines)
-
-    def _process_records(self, lines: List[str]) -> None:
+    def _process_records(
+        self,
+        lines: Union[List[str], List[bytes]],
+        progress_increase: float,
+        parallel=True,
+    ) -> None:
         """Process the loaded records, parsing them and adding them to the model"""
-        log.info("Parsing records")
-        self.progress = 0.0
 
-        lines = [line for line in lines if len(line.strip()) != 0]
+        # if lines is binary, convert to text
+        if len(lines) > 0 and isinstance(lines[0], bytes):
+            str_lines = [line.decode("utf-8") for line in lines]  # type: ignore
+        else:
+            str_lines: List[str] = lines  # type: ignore
+        lines = [line for line in str_lines if len(line.strip()) != 0]
 
         if len(lines) == 0:
-            raise RuntimeError(
-                "Loading was successful, but no records were found. \
-Are you asking for the wrong time?"
-            )
+            log.info("No records to process")
+            return
 
-        for i, line in enumerate(lines):
-            self.progress = i / len(lines)
+        # translate the lines from json to a dict in parallel
 
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError as exc:
-                log.err(f"Error decoding record: {line}")
-                log.traceback(exc)
-                continue
+        # for some reason, forking seems to break stdin/out in some cases
+        if parallel:
+            multiprocessing.set_start_method("spawn")
+            with multiprocessing.Pool() as pool:
+                records = pool.map(json.loads, lines)
+        else:
+            records = [json.loads(line) for line in lines]
+
+        self.progress += 0.5 * progress_increase
+
+        for record in records:
+            self.progress += 1 / len(lines) * progress_increase * 0.5
 
             short_schema = record["schema"].split(":")[0]
 
@@ -234,13 +257,12 @@ Are you asking for the wrong time?"
         )
         # parse the response
         self.clusters[org_uid] = json.loads(response)
-        log.log(self.clusters[org_uid])
 
-    def guard_api_call(
-        self, method: Literal["GET", "POST"], url: str, **input_data
-    ) -> bytes:
+    def guard_api_call(self, method: str, url: str, **input_data) -> bytes:
         """Calls the api with the given arguments, properly handling any errors
         in the API call and converting them to an APIError"""
+        if self._config.api_key is None:
+            raise APIError("API key is not set")
         headers = {
             "Authorization": f"Bearer {self._config.api_key}",
             "Content-Type": "application/json",
@@ -251,7 +273,7 @@ Are you asking for the wrong time?"
             raise ValueError("Data cannot be loaded from an API; there is no url")
         log.debug(f"Making API call to {self._config.input + url} with ", input_data)
         try:
-            api_response: urllib3.HTTPResponse = self._connection_pool.request(
+            api_response = self._connection_pool.request(
                 method,
                 url=self._config.input + url,
                 headers=headers,
@@ -259,9 +281,9 @@ Are you asking for the wrong time?"
             )
             newline = b"\n"
             log.debug(
-                f"Context-uid in response to {url}: \
-{api_response.headers.get('x-context-uid', None)}, \
-status: {api_response.status}, size: {len(api_response.data.split(newline))}"
+                f"Context-uid in response to {url}: "
+                f"{api_response.headers.get('x-context-uid', None)}, "
+                f"status: {api_response.status}, size: {len(api_response.data.split(newline))}"
             )
         except MaxRetryError as exc:
             raise APIError(
@@ -281,6 +303,10 @@ Args: {exc.args}\
             raise APIError("There was an issue trying to connect to the API.") from exc
 
         if api_response.status != 200:
+            sanitized_headers = {
+                "Authorization": f"Bearer {self._config.api_key[:3]}...{self._config.api_key[-3:]}",
+                **headers,
+            }
             log.debug(
                 f"""\
 Debug info:
@@ -289,7 +315,7 @@ Input data: {input_data}
 Status code: {api_response.status}
 Reason: {api_response.reason}
 Headers: {api_response.headers}
-Request Headers: {headers}
+Request Headers: {sanitized_headers}
 Body: {api_response.data.decode("utf-8")}
 Context-UID: {api_response.headers.get("x-context-uid", None) if api_response.headers else None}\
 """
