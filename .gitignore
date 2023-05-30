@@ -9,7 +9,8 @@ __pycache__
 .vscode/settings.json
 .env
 .venv
+*.log.gz
 
 # files created by spydertop
 *.json.gz
-spydertop.log
+*.log

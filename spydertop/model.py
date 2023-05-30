@@ -12,12 +12,12 @@ to fetch and cache data from the Spyderbat API
 
 from itertools import groupby
 import threading
-import orjson as json
 import gzip
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, Optional, List, Any, Tuple
 import uuid
 
+import orjson
 import urllib3
 
 from spydertop.config import Config
@@ -260,6 +260,9 @@ not enough information could be loaded.\
                 log.traceback(exc)
                 self.fail(str(exc))
                 return None
+            except Exception as exc:  # pylint: disable=broad-except
+                self.fail("An exception occurred while loading orgs")
+                log.traceback(exc)
         return self._record_pool.orgs
 
     def get_sources(
@@ -283,6 +286,9 @@ not enough information could be loaded.\
                 log.traceback(exc)
                 self.fail(str(exc))
                 return None
+            except Exception as exc:  # pylint: disable=broad-except
+                self.fail("An exception occurred while loading sources")
+                log.traceback(exc)
         return self._record_pool.sources.get(self.config.org)
 
     def get_clusters(self) -> Optional[List[dict]]:
@@ -301,6 +307,9 @@ not enough information could be loaded.\
                 log.traceback(exc)
                 self.fail(str(exc))
                 return None
+            except Exception as exc:  # pylint: disable=broad-except
+                self.fail("An exception occurred while loading clusters")
+                log.traceback(exc)
         return self._record_pool.clusters.get(self.config.org)
 
     def log_api(self, name: str, data: Dict[str, Any]) -> None:
@@ -330,7 +339,7 @@ not enough information could be loaded.\
                 "POST",
                 f"{url}/api/v1/_/log",
                 headers=headers,
-                body=json.dumps(new_data),
+                body=orjson.dumps(new_data),
             )
             # check the response
             if response.status != 200:

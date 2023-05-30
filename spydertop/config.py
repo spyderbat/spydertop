@@ -11,6 +11,7 @@ Configuration object and associated functions
 
 import logging
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO, Union
 from datetime import datetime, timedelta
 
@@ -206,17 +207,11 @@ Section default does not contain {exc.args[0]}, and it was not specified as a co
 
     def dump(self) -> None:
         """Saves the settings in a persistent configuration file"""
-        config_dir = os.path.join(
-            os.environ.get("HOME"), ".spyderbat-api/"  # type: ignore
-        )
-
-        # ensure that the config directory exists
-        if not os.path.exists(config_dir):
-            os.mkdir(config_dir)
+        config_dir = get_config_dir()
 
         # save the config file
         with open(
-            os.path.join(config_dir, ".spydertop-settings.yaml"), "w", encoding="utf-8"
+            config_dir / ".spydertop-settings.yaml", "w", encoding="utf-8"
         ) as file:
             exclude_settings = ["filter", "sort_column", "sort_ascending", "play"]
             for key in exclude_settings:
@@ -283,3 +278,14 @@ config:
             and "*" not in self.machine  # * is a wildcard for the source
             and self.start_time is not None
         ) or not isinstance(self.input, str)
+
+
+def get_config_dir() -> Path:
+    """Returns the path to the config directory, ensuring that it exists"""
+    config_dir = os.path.join(os.environ.get("HOME"), ".spyderbat-api/")  # type: ignore
+
+    # ensure that the config directory exists
+    if not os.path.exists(config_dir):
+        os.mkdir(config_dir)
+
+    return Path(config_dir)

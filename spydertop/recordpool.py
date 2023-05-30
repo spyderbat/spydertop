@@ -15,16 +15,17 @@ import asyncio
 from collections import defaultdict
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import timedelta
-import orjson as json
 import multiprocessing
 from time import perf_counter_ns
 from typing import DefaultDict, Dict, List, Optional, Union
 
+import orjson
 import urllib3
 from urllib3.exceptions import MaxRetryError
 
 from spydertop.config import Config
 from spydertop.utils import log
+from spydertop.utils.cache import DEFAULT_TIMEOUT, cache_block
 from spydertop.utils.types import APIError, Record, TimeSpanTracker
 
 
@@ -155,7 +156,7 @@ No more records can be loaded."
         if self._config.output:
             start = perf_counter_ns()
             lines = [
-                json.dumps(record).decode()
+                orjson.dumps(record).decode()
                 for group in self.records.values()
                 for record in group.values()
             ]
@@ -189,9 +190,9 @@ No more records can be loaded."
         if parallel:
             multiprocessing.set_start_method("spawn")
             with multiprocessing.Pool() as pool:
-                records = pool.map(json.loads, lines)
+                records = pool.map(orjson.loads, lines)
         else:
-            records = [json.loads(line) for line in lines]
+            records = [orjson.loads(line) for line in lines]
         end = perf_counter_ns()
         log.log(f"Finished parsing records in {(end - start) / 1e9} seconds")
 
@@ -218,12 +219,17 @@ No more records can be loaded."
         """Check if the data is loaded for a given timestamp"""
         return self._time_span_tracker.is_loaded(timestamp)
 
-    def load_orgs(self) -> None:
+    def load_orgs(self, force_reload=False) -> None:
         """Fetch a list of organization for this api_key"""
 
-        orgs = self.guard_api_call(method="GET", url="/api/v1/org/")
+        orgs = self.guard_api_call(
+            method="GET",
+            url="/api/v1/org/",
+            enable_cache=True,
+            timeout=(timedelta(minutes=0) if force_reload else timedelta(hours=1)),
+        )
         start = perf_counter_ns()
-        orgs = json.loads(orgs)
+        orgs = orjson.loads(orgs)
         end = perf_counter_ns()
         log.log(f"Finished parsing orgs in {(end - start) / 1e9} seconds")
         self.orgs = orgs
@@ -234,6 +240,7 @@ No more records can be loaded."
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         uid: Optional[str] = None,
+        force_reload=False,
     ) -> None:
         """Fetch a list of sources for this api_key"""
         # this tends to take a long time for large organizations
@@ -247,83 +254,110 @@ No more records can be loaded."
             kwargs["page_size"] = page_size
         if uid is not None:
             kwargs["agent_uid_equals"] = uid
+        start = perf_counter_ns()
         raw_sources = self.guard_api_call(
             method="GET",
             url=f"/api/v1/org/{org_uid}/source/",
-            org_uid=self._config.org,
+            enable_cache=True,
+            timeout=(timedelta(minutes=0) if force_reload else timedelta(minutes=15)),
             **kwargs,
         )
+        end = perf_counter_ns()
+        log.log(f"Finished fetching sources in {(end - start) / 1e9} seconds")
         start = perf_counter_ns()
-        sources: List = json.loads(raw_sources)
+        sources: List = orjson.loads(raw_sources)
         end = perf_counter_ns()
         log.log(f"Finished parsing sources in {(end - start) / 1e9} seconds")
 
         if len(sources) > 0:
             self.sources[org_uid] = sources
 
-    def load_clusters(self, org_uid: str) -> None:
+    def load_clusters(self, org_uid: str, force_reload=False) -> None:
         """Fetch a list of clusters for this api_key"""
         response = self.guard_api_call(
             "GET",
             f"/api/v1/org/{org_uid}/cluster/",
+            enable_cache=True,
+            timeout=(timedelta(minutes=0) if force_reload else timedelta(minutes=15)),
         )
         # parse the response
         start = perf_counter_ns()
-        self.clusters[org_uid] = json.loads(response)
+        self.clusters[org_uid] = orjson.loads(response)
         end = perf_counter_ns()
         log.log(f"Finished parsing clusters in {(end - start) / 1e9} seconds")
 
-    def guard_api_call(self, method: str, url: str, **input_data) -> bytes:
+    def guard_api_call(
+        self,
+        method: str,
+        url: str,
+        timeout: timedelta = DEFAULT_TIMEOUT,
+        enable_cache=False,
+        **input_data,
+    ) -> bytes:
         """Calls the api with the given arguments, properly handling any errors
         in the API call and converting them to an APIError"""
-        if self._config.api_key is None:
-            raise APIError("API key is not set")
-        headers = {
-            "Authorization": f"Bearer {self._config.api_key}",
-            "Content-Type": "application/json",
-        }
+
         if self._connection_pool is None:
             raise RuntimeError("Connection pool is not initialized")
         if not isinstance(self._config.input, str):
             raise ValueError("Data cannot be loaded from an API; there is no url")
-        log.debug(f"Making API call to {self._config.input + url} with ", input_data)
-        try:
-            api_response = self._connection_pool.request(
-                method,
-                url=self._config.input + url,
-                headers=headers,
-                body=(json.dumps(input_data) if method == "POST" else None),
-            )
-            newline = b"\n"
+
+        start = perf_counter_ns()
+        full_url = self._config.input + url
+        conn_pool = self._connection_pool
+
+        def make_api_call():
+            if self._config.api_key is None:
+                raise APIError("API key is not set")
+            headers = {
+                "Authorization": f"Bearer {self._config.api_key}",
+                "Content-Type": "application/json",
+            }
+            assert isinstance(self._config.input, str)
             log.debug(
-                f"Context-uid in response to {url}: "
-                f"{api_response.headers.get('x-context-uid', None)}, "
-                f"status: {api_response.status}, size: {len(api_response.data.split(newline))}"
+                f"Making API call to {self._config.input + url} with ", input_data
             )
-        except MaxRetryError as exc:
-            raise APIError(
-                f"There was an issue trying to connect to the API. \
-Is the url {self._config.input} correct?"
-            ) from exc
-        except Exception as exc:
-            log.traceback(exc)
-            log.debug(
-                f"""\
+            try:
+                api_response = conn_pool.request(
+                    method,
+                    url=full_url,
+                    headers=headers,
+                    body=(orjson.dumps(input_data) if method == "POST" else None),
+                )
+                newline = b"\n"
+                log.debug(
+                    f"Context-uid in response to {url}: "
+                    f"{api_response.headers.get('x-context-uid', None)}, "
+                    f"status: {api_response.status}, size: {len(api_response.data.split(newline))}"
+                )
+
+            except MaxRetryError as exc:
+                raise APIError(
+                    "There was an issue trying to connect to the API."
+                    f"Is the url {self._config.input} correct?"
+                ) from exc
+            except Exception as exc:
+                log.traceback(exc)
+                log.debug(
+                    f"""\
 Debug info:
 API Call: {url}
 Input data: {input_data}
 Args: {exc.args}\
 """
-            )
-            raise APIError("There was an issue trying to connect to the API.") from exc
+                )
+                raise APIError(
+                    "There was an issue trying to connect to the API."
+                ) from exc
 
-        if api_response.status != 200:
-            sanitized_headers = {
-                "Authorization": f"Bearer {self._config.api_key[:3]}...{self._config.api_key[-3:]}",
-                **headers,
-            }
-            log.debug(
-                f"""\
+            if api_response.status != 200:
+                sanitized_headers = {
+                    "Authorization": f"Bearer {self._config.api_key[:3]}"
+                    f"...{self._config.api_key[-3:]}",
+                    **headers,
+                }
+                log.debug(
+                    f"""\
 Debug info:
 API Call: {method} {url}
 Input data: {input_data}
@@ -334,8 +368,20 @@ Request Headers: {sanitized_headers}
 Body: {api_response.data.decode("utf-8")}
 Context-UID: {api_response.headers.get("x-context-uid", None) if api_response.headers else None}\
 """
+                )
+                raise APIError(
+                    f"Loading data from the api failed with reason: {api_response.reason}"
+                )
+            return api_response.data
+
+        if enable_cache:
+            data = cache_block(
+                orjson.dumps((self._config.api_key, method, full_url, input_data)),
+                make_api_call,
+                timeout=timeout,
             )
-            raise APIError(
-                f"Loading data from the api failed with reason: {api_response.reason}"
-            )
-        return api_response.data
+        else:
+            data = make_api_call()
+        end = perf_counter_ns()
+        log.log(f"Finished API call in {(end - start) / 1e9} seconds")
+        return data

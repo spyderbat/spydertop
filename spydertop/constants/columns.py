@@ -13,9 +13,10 @@ The Column class is used to define the columns that are displayed in the table.
 """
 
 from datetime import datetime, timedelta, timezone
-import orjson as json
 from time import perf_counter_ns
 from typing import Any, Dict, List, Optional, Type, Callable, TYPE_CHECKING
+
+import orjson
 
 from spydertop.utils import (
     get_timezone,
@@ -166,7 +167,7 @@ def format_environ(_m, _p, environ: Dict[str, str]):
     """Format the environment of a process"""
     start = perf_counter_ns()
     environ_lines = (
-        json.dumps(environ, option=json.OPT_INDENT_2 | json.OPT_SORT_KEYS)
+        orjson.dumps(environ, option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS)
         .decode()
         .split("\n")
     )
@@ -608,7 +609,7 @@ def format_mounts(_m: AppModel, _c: Record, mounts: List[Record]) -> str:
 def format_networks(_m: AppModel, _c: Record, networks: dict) -> str:
     """Format the networks for a container."""
     return "\n".join(
-        f"{key}: {json.dumps(value)}" for key, value in networks.items() if value
+        f"{key}: {orjson.dumps(value)}" for key, value in networks.items() if value
     )
 
 
