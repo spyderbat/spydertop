@@ -741,12 +741,15 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self._model.log_api(API_LOG_TYPES["navigation"], {"menu": "url"})
 
         row = self._columns.get_selected()
-        if (
-            not row
-            or not self._model.config.org
-            or not self._model.config.machine
-            or not isinstance(self._model.config.input, str)
-        ):
+        source = None
+
+        if self._model.selected_machine is not None:
+            source = self._model.selected_machine
+        elif row is not None:
+            record = self._model.get_record_by_id(row[1][0]) or {}
+            source = record.get("muid", None)
+
+        if not row or not self._model.config.org or not source:
             log.info("No row selected or no org/machine/input. Skipping URL")
             assert self.scene is not None, "A scene must be set in the frame before use"
             self.scene.add_effect(
@@ -761,7 +764,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             return
 
         url = f"https://app.spyderbat.com/app/org/{self._model.config.org}\
-/source/{self._model.config.machine}/spyder-console?ids={urllib.parse.quote(str(row[0][0]))}"
+/source/{source}/spyder-console?ids={urllib.parse.quote(str(row[1][0]))}"
 
         # try to open the url in the browser and copy it to the clipboard
         browser_label = "URL not opened in browser"

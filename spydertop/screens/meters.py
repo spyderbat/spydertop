@@ -74,7 +74,7 @@ def show_disk_io(model: AppModel):
     """Generates the string for the network meter"""
     values: Optional[Dict[str, int]] = None
     if model.selected_machine is not None:
-        values = get_network_values(model, model.selected_machine)
+        values = get_disk_values(model, model.selected_machine)
     else:
         net_values = [get_disk_values(model, muid) for muid in model.machines.keys()]
         filtered = [n for n in net_values if n is not None]
@@ -178,9 +178,9 @@ def show_tasks(model: AppModel):
         task_count = "${1,1}Not Available"
     else:
         task_count = processes - tasks["kernel_threads"]
-    running = tasks["running"]
-    threads = tasks["total_threads"] - tasks["kernel_threads"]
-    kthreads = tasks["kernel_threads"]
+    running = tasks.get("running", 0)
+    kthreads = tasks.get("kernel_threads", 0)
+    threads = tasks.get("total_threads", 0) - kthreads
 
     thread_style = "${8,1}" if model.config["hide_threads"] else "${2,1}"
     thread_lbl_style = (
@@ -222,7 +222,7 @@ def show_ld_avg(model: AppModel):
         return add_palette("  ${{{meter_label}}}Load average: ${{1,1}}No Data", model)
 
     for i, load in enumerate(ld_avg):
-        ld_avg[i] = f"{load / num_machines:.2f}"
+        ld_avg[i] = f"{float(load) / num_machines:.2f}"
 
     if len(ld_avg) == 1:
         return add_palette(

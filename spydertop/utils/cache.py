@@ -25,8 +25,6 @@ def cache_block(
     numeric_hash = hashlib.md5(key, usedforsecurity=True).hexdigest()
     hashed_key = f"block:{numeric_hash}"
 
-    log.log("created cache block", key, hashed_key)
-
     result = _cache_get(hashed_key, timeout)
     if result is None:
         result = func()
@@ -50,9 +48,11 @@ def _disk_cache_get(key: str, timeout: timedelta) -> Optional[bytes]:
 
     cache_file = cache_dir / key
     if not cache_file.exists():
+        log.debug("cache miss;reason=nonexistent", key)
         return None
 
     if cache_file.stat().st_mtime < (datetime.now() - timeout).timestamp():
+        log.debug("cache miss;reason=expired", key)
         return None
 
     with gzip.open(cache_file, "rb") as open_file:

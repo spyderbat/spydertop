@@ -270,7 +270,6 @@ logging into your account on the website.\
 
                     def reload_orgs():
                         self.set_cache(force_reload=True)
-                        self.org_confirmed = False
                         self.set_cache(orgs=None)
                         self._on_submit = None
                         self.trigger_build()

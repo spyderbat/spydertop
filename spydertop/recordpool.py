@@ -16,7 +16,6 @@ from collections import defaultdict
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import timedelta
 import multiprocessing
-from time import perf_counter_ns
 from typing import DefaultDict, Dict, List, Optional, Union
 
 import orjson
@@ -154,14 +153,11 @@ No more records can be loaded."
             self._process_records(lines, 1.0)
 
         if self._config.output:
-            start = perf_counter_ns()
             lines = [
-                orjson.dumps(record).decode()
+                orjson.dumps(record).decode() + "\n"
                 for group in self.records.values()
                 for record in group.values()
             ]
-            end = perf_counter_ns()
-            log.log(f"Dumping records took: {(end - start) / 1e9} seconds")
             self._config.output.writelines(lines)
 
     def _process_records(
@@ -185,7 +181,6 @@ No more records can be loaded."
 
         # translate the lines from json to a dict in parallel
 
-        start = perf_counter_ns()
         # for some reason, forking seems to break stdin/out in some cases
         if parallel:
             multiprocessing.set_start_method("spawn")
@@ -193,8 +188,6 @@ No more records can be loaded."
                 records = pool.map(orjson.loads, lines)
         else:
             records = [orjson.loads(line) for line in lines]
-        end = perf_counter_ns()
-        log.log(f"Finished parsing records in {(end - start) / 1e9} seconds")
 
         self.progress += 0.5 * progress_increase
 
@@ -212,7 +205,6 @@ No more records can be loaded."
                     continue
             group[rec_id] = record
 
-        log.info("Finished parsing records")
         self.loaded = True
 
     def is_loaded(self, timestamp: float) -> bool:
@@ -228,13 +220,10 @@ No more records can be loaded."
             enable_cache=True,
             timeout=(timedelta(minutes=0) if force_reload else timedelta(hours=1)),
         )
-        start = perf_counter_ns()
         orgs = orjson.loads(orgs)
-        end = perf_counter_ns()
-        log.log(f"Finished parsing orgs in {(end - start) / 1e9} seconds")
         self.orgs = orgs
 
-    def load_sources(
+    def load_sources(  # pylint: disable=too-many-arguments
         self,
         org_uid: str,
         page: Optional[int] = None,
@@ -254,7 +243,6 @@ No more records can be loaded."
             kwargs["page_size"] = page_size
         if uid is not None:
             kwargs["agent_uid_equals"] = uid
-        start = perf_counter_ns()
         raw_sources = self.guard_api_call(
             method="GET",
             url=f"/api/v1/org/{org_uid}/source/",
@@ -262,12 +250,7 @@ No more records can be loaded."
             timeout=(timedelta(minutes=0) if force_reload else timedelta(minutes=15)),
             **kwargs,
         )
-        end = perf_counter_ns()
-        log.log(f"Finished fetching sources in {(end - start) / 1e9} seconds")
-        start = perf_counter_ns()
         sources: List = orjson.loads(raw_sources)
-        end = perf_counter_ns()
-        log.log(f"Finished parsing sources in {(end - start) / 1e9} seconds")
 
         if len(sources) > 0:
             self.sources[org_uid] = sources
@@ -281,10 +264,7 @@ No more records can be loaded."
             timeout=(timedelta(minutes=0) if force_reload else timedelta(minutes=15)),
         )
         # parse the response
-        start = perf_counter_ns()
         self.clusters[org_uid] = orjson.loads(response)
-        end = perf_counter_ns()
-        log.log(f"Finished parsing clusters in {(end - start) / 1e9} seconds")
 
     def guard_api_call(
         self,
@@ -302,7 +282,6 @@ No more records can be loaded."
         if not isinstance(self._config.input, str):
             raise ValueError("Data cannot be loaded from an API; there is no url")
 
-        start = perf_counter_ns()
         full_url = self._config.input + url
         conn_pool = self._connection_pool
 
@@ -382,6 +361,4 @@ Context-UID: {api_response.headers.get("x-context-uid", None) if api_response.he
             )
         else:
             data = make_api_call()
-        end = perf_counter_ns()
-        log.log(f"Finished API call in {(end - start) / 1e9} seconds")
         return data

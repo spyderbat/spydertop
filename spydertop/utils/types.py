@@ -58,6 +58,33 @@ class Bytes:
             n_bytes /= 1024
         return f"${{1,1}}{n_bytes}P"
 
+    def __eq__(self, __value: object) -> bool:
+        if isinstance(__value, Bytes):
+            return self.value == __value.value
+        if isinstance(__value, int):
+            return self.value == __value
+        if isinstance(__value, str):
+            return self.value == Bytes.parse_bytes(__value)
+        return False
+
+    def __lt__(self, __value: object) -> bool:
+        if isinstance(__value, Bytes):
+            return self.value < __value.value
+        if isinstance(__value, int):
+            return self.value < __value
+        if isinstance(__value, str):
+            return self.value < Bytes.parse_bytes(__value)
+        return False
+
+    def __le__(self, __value: object) -> bool:
+        return self < __value or self == __value
+
+    def __gt__(self, __value: object) -> bool:
+        return not self <= __value
+
+    def __ge__(self, __value: object) -> bool:
+        return not self < __value
+
     @staticmethod
     def parse_bytes(value: str) -> int:
         """Parse a string into bytes"""
@@ -175,7 +202,6 @@ class DelayedLog:
         self.logger = logging.getLogger("spydertop")
         # disable noisy logging for asciimatics
         logging.getLogger("asciimatics").setLevel(logging.WARNING)
-        self.log(f"Setting log level to {self.log_level}")
 
     def dump(self):
         """Print all logs to the console."""

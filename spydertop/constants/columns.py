@@ -13,7 +13,6 @@ The Column class is used to define the columns that are displayed in the table.
 """
 
 from datetime import datetime, timedelta, timezone
-from time import perf_counter_ns
 from typing import Any, Dict, List, Optional, Type, Callable, TYPE_CHECKING
 
 import orjson
@@ -165,14 +164,11 @@ def color_cmd(_m, process: Record, args: List[str]):
 
 def format_environ(_m, _p, environ: Dict[str, str]):
     """Format the environment of a process"""
-    start = perf_counter_ns()
     environ_lines = (
         orjson.dumps(environ, option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS)
         .decode()
         .split("\n")
     )
-    end = perf_counter_ns()
-    log.log(f"Formatting environ took {(end - start) / 1e6} ms")
     if len(environ_lines) > 10:
         environ_lines = environ_lines[:9] + ["    ... <remaining values hidden>"]
     return "\n".join(environ_lines)

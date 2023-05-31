@@ -113,11 +113,9 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
         """Load data from the source, either the API or a file, then process it"""
         try:
             self._record_pool.load(timestamp, duration, before)
-            log.log(
-                [
-                    f"{key}: {len(value)}"
-                    for key, value in self._record_pool.records.items()
-                ]
+            log.debug(
+                "Loaded Items: ",
+                {key: len(value) for key, value in self._record_pool.records.items()},
             )
         except (RuntimeError, APIError) as exc:
             log.traceback(exc)
@@ -140,7 +138,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
 
         self.rebuild_tree()
 
-        log.info("Finished parsing records")
+        log.info("Finished loading data")
         self._fix_state()
 
     def _correct_meminfo(self) -> None:
@@ -568,6 +566,13 @@ not enough information could be loaded.\
         return self._record_pool.is_loaded(timestamp) or not isinstance(
             self.config.input, str
         )
+
+    def get_record_by_id(self, record_id: str) -> Optional[Record]:
+        """Get a record from the record pool by its ID"""
+        for group in self._record_pool.records.values():
+            if record_id in group:
+                return group[record_id]
+        return None
 
     @property
     def loaded(self) -> bool:
