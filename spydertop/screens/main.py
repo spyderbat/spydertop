@@ -108,7 +108,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
         self.set_theme(model.config["theme"])
 
-    def _init_widgets(self):
+    def _init_widgets(self):  # pylint: disable=too-many-statements
         """Initialize the widgets for the main frame. This is separate from the
         __init__ function because the widgets require the model to be initialized."""
         ############## Header #################
@@ -223,12 +223,25 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         header.add_widget(Padding(), 1)
 
         ################# Main Table Tabs #######################
-        tabs_layout = Layout(calculate_widths(self.screen.width, [1] * 6))
+        available_tabs = [
+            "Processes",
+            "Flags",
+            "Sessions",
+            "Connections",
+            "Listening",
+            "Containers",
+        ]
+        for tab in available_tabs.copy():
+            # if there are no records for the tab, don't add it
+            if len(getattr(self._model, tab.lower())) == 0:
+                available_tabs.remove(tab)
+
+        tabs_layout = Layout(
+            calculate_widths(self.screen.width, [1] * len(available_tabs))
+        )
         self._tabs = []
         self.add_layout(tabs_layout)
-        for i, name in enumerate(
-            ["Processes", "Flags", "Sessions", "Connections", "Listening", "Containers"]
-        ):
+        for i, name in enumerate(available_tabs):
 
             def wrapper(name):
                 def inner():
@@ -239,6 +252,9 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             button = Button(name, wrapper(name), add_box=False)
             self._tabs.append(button)
             tabs_layout.add_widget(button, i)
+
+        if self._model.config["tab"] not in [t.lower() for t in available_tabs]:
+            self._model.config["tab"] = available_tabs[0].lower()
 
         ################# Main Table #######################
         self._main = Layout([1], fill_frame=True)
