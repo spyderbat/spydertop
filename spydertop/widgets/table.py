@@ -283,7 +283,11 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
 
         # if we are displaying a tree, we need to use the tree to sort
         # first, and to modify the command
-        if self._config["tree"] and self._config["tab"] == "processes":
+        if (
+            self._config["tree"]
+            and self._config["tab"] == "processes"
+            and self.tree is not None
+        ):
             # we need the columns to have an ID
             assert self.columns[0].header_name == "ID"
             # refactor cached sortable data to be indexed by id
@@ -291,8 +295,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
             for row in self._rows:
                 sortable[row[1][0]] = row
 
-            if self.tree is not None:
-                self._tree_rows = self._sort_level(self.tree, sortable, 0, [])
+            self._tree_rows = self._sort_level(self.tree, sortable, 0, [])
         else:
             self._rows = self._simple_sort(self._rows)
         self.do_filter()

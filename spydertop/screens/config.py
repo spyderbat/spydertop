@@ -523,7 +523,9 @@ Once you have a source configured, you can continue.\
         # taking too long to calculate the column widths
         for answer in answers[:100]:
             for i in range(len(answer[0])):
-                columns[i] = max(columns[i], len(answer[0][i]) + 1)
+                columns[i] = max(
+                    columns[i], len(re.sub(COLOR_REGEX, "", answer[0][i])) + 1
+                )
         columns = [Column("", min(c, 40), str) for c in columns]
         columns[-1].max_width = 0
 
