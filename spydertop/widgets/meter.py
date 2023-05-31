@@ -77,7 +77,7 @@ class Meter(Widget):
 
         padding_start = 2
         padding_end = 1
-        label_width = 3
+        label_width = len(self._label)
 
         # draw label
         (color, attr, background) = (
@@ -160,7 +160,7 @@ class Meter(Widget):
             val_sum = 0
 
             # find what color the character should be
-            for (i, value) in enumerate(self._values):
+            for i, value in enumerate(self._values):
                 val_sum += value
                 if chr_val < val_sum:
                     color = self.colors[i]

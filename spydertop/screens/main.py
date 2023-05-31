@@ -10,7 +10,6 @@ The main frame for the tool. This frame contains the record list and usage metri
 as well as showing all the menu buttons.
 """
 
-from math import nan
 import re
 from typing import Any, Dict, List, Optional
 import urllib.parse
@@ -42,8 +41,15 @@ from spydertop.screens.meters import (
 )
 from spydertop.screens.modals import InputModal, NotificationModal
 from spydertop.widgets import Table
-from spydertop.utils import log, convert_to_seconds, pretty_time, calculate_widths
-from spydertop.utils.types import ExtendedParser
+from spydertop.utils import (
+    align_with_overflow,
+    get_machine_short_name,
+    log,
+    convert_to_seconds,
+    pretty_time,
+    calculate_widths,
+)
+from spydertop.utils.types import Alignment, ExtendedParser
 from spydertop.constants import API_LOG_TYPES
 from spydertop.constants.columns import (
     CONTAINER_COLUMNS,
@@ -78,9 +84,9 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     _last_effects: int = 1
 
     # widgets
-    _main: Layout
+    _main: Optional[Layout] = None
     _footer: Footer
-    _cpus: List[Meter] = []
+    _cpus: Dict[str, List[Meter]] = {}
     _tabs: List[Button] = []
     _memory: Meter
     _swap: Meter
@@ -102,43 +108,69 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
         self.set_theme(model.config["theme"])
 
-    def _init_widgets(self):
+    def _init_widgets(self):  # pylint: disable=too-many-statements
         """Initialize the widgets for the main frame. This is separate from the
         __init__ function because the widgets require the model to be initialized."""
         ############## Header #################
         header = Layout([1, 1], fill_frame=False)
         self.add_layout(header)
-        header.add_widget(Padding(), 0)
-        header.add_widget(Padding(), 1)
+
+        # Show what machine is selected
+        header.add_widget(
+            FuncLabel(
+                lambda: "Machine: " if self._model.selected_machine is not None else "",
+                align=Alignment.RIGHT,
+            ),
+            0,
+        )
+        header.add_widget(
+            FuncLabel(
+                lambda: get_machine_short_name(
+                    self._model.machines[self._model.selected_machine]
+                )
+                if self._model.selected_machine is not None
+                else ""
+            ),
+            1,
+        )
 
         # meters
-        self._cpus = []
-        cpu_count = (
-            self._model.machine["machine_cores"]
-            if self._model.machine
-            else len(self._model.get_value("cpu_time") or [])
-        )
-        for i in range(0, cpu_count):
-            self._cpus.append(
-                Meter(
-                    f"{i:<3}",
-                    values=[0, 0, 0, 0],
-                    colors=[
-                        Screen.COLOUR_BLUE,
-                        Screen.COLOUR_GREEN,
-                        Screen.COLOUR_RED,
-                        Screen.COLOUR_CYAN,
-                    ],
-                    total=1,
-                    percent=True,
-                    important_value=3,
+        self._cpus = {}
+        cpu_count = 0
+        for machine in self._model.machines.values():
+            cpu_count = machine["machine_cores"]
+            self._cpus[machine["id"]] = []
+
+            for i in range(0, cpu_count):
+                if i == 0:
+                    name = (
+                        align_with_overflow(
+                            get_machine_short_name(machine), 20, include_padding=False
+                        )
+                        + f" {i} "
+                    )
+                else:
+                    name = f"{i:<3}"
+                self._cpus[machine["id"]].append(
+                    Meter(
+                        name,
+                        values=[0, 0, 0, 0],
+                        colors=[
+                            Screen.COLOUR_BLUE,
+                            Screen.COLOUR_GREEN,
+                            Screen.COLOUR_RED,
+                            Screen.COLOUR_CYAN,
+                        ],
+                        total=1,
+                        percent=True,
+                        important_value=3,
+                    )
                 )
-            )
-            if i < cpu_count / 2:
-                column = 0
-            else:
-                column = 1
-            header.add_widget(self._cpus[i], column)
+                if i < cpu_count / 2:
+                    column = 0
+                else:
+                    column = 1
+                header.add_widget(self._cpus[machine["id"]][i], column)
         self._memory = Meter(
             "Mem",
             values=[0, 0, 0, 0],
@@ -191,12 +223,25 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         header.add_widget(Padding(), 1)
 
         ################# Main Table Tabs #######################
-        tabs_layout = Layout(calculate_widths(self.screen.width, [1] * 6))
+        available_tabs = [
+            "Processes",
+            "Flags",
+            "Sessions",
+            "Connections",
+            "Listening",
+            "Containers",
+        ]
+        for tab in available_tabs.copy():
+            # if there are no records for the tab, don't add it
+            if len(getattr(self._model, tab.lower())) == 0:
+                available_tabs.remove(tab)
+
+        tabs_layout = Layout(
+            calculate_widths(self.screen.width, [1] * len(available_tabs))
+        )
         self._tabs = []
         self.add_layout(tabs_layout)
-        for i, name in enumerate(
-            ["Processes", "Flags", "Sessions", "Connections", "Listening", "Containers"]
-        ):
+        for i, name in enumerate(available_tabs):
 
             def wrapper(name):
                 def inner():
@@ -207,6 +252,9 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             button = Button(name, wrapper(name), add_box=False)
             self._tabs.append(button)
             tabs_layout.add_widget(button, i)
+
+        if self._model.config["tab"] not in [t.lower() for t in available_tabs]:
+            self._model.config["tab"] = available_tabs[0].lower()
 
         ################# Main Table #######################
         self._main = Layout([1], fill_frame=True)
@@ -219,7 +267,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
         status = FuncLabel(
             lambda: f"{self._model.state}",
-            align=">",
+            align=Alignment.RIGHT,
             parser=ExtendedParser(),
             color="focus_button",
         )
@@ -337,9 +385,10 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             # update screen if needed
             if self.needs_screen_refresh:
                 # update header
-                for (i, cpu) in enumerate(self._cpus):
-                    values = update_cpu(i, self._model)
-                    cpu.value = values
+                for muid, cpus in self._cpus.items():
+                    for i, cpu in enumerate(cpus):
+                        values = update_cpu(i, self._model, muid)
+                        cpu.value = values
                 (self._memory.total, self._memory.value) = update_memory(self._model)
                 (self._swap.total, self._swap.value) = update_swap(self._model)
 
@@ -354,7 +403,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     def process_event(self, event):
         self.needs_screen_refresh = True
         # force the main table to have focus
-        self.switch_focus(self._main, 0, 0)
+        if self._main is not None:
+            self.switch_focus(self._main, 0, 0)
         # Do the key handling for this Frame.
         key_map = {
             "q": self._quit,
@@ -441,8 +491,10 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             if "valid_from" in record:
                 if record["valid_from"] > self._model.timestamp or (
                     "valid_to" in record
+                    and "muid" in record
                     and record["valid_to"]
-                    < self._model.timestamp - self._model.time_elapsed
+                    < self._model.timestamp
+                    - self._model.get_time_elapsed(record["muid"])
                 ):
                     continue
             elif "time" in record:
@@ -705,12 +757,15 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self._model.log_api(API_LOG_TYPES["navigation"], {"menu": "url"})
 
         row = self._columns.get_selected()
-        if (
-            not row
-            or not self._model.config.org
-            or not self._model.config.machine
-            or not isinstance(self._model.config.input, str)
-        ):
+        source = None
+
+        if self._model.selected_machine is not None:
+            source = self._model.selected_machine
+        elif row is not None:
+            record = self._model.get_record_by_id(row[1][0]) or {}
+            source = record.get("muid", None)
+
+        if not row or not self._model.config.org or not source:
             log.info("No row selected or no org/machine/input. Skipping URL")
             assert self.scene is not None, "A scene must be set in the frame before use"
             self.scene.add_effect(
@@ -725,7 +780,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             return
 
         url = f"https://app.spyderbat.com/app/org/{self._model.config.org}\
-/source/{self._model.config.machine}/spyder-console?ids={urllib.parse.quote(str(row[0][0]))}"
+/source/{source}/spyder-console?ids={urllib.parse.quote(str(row[1][0]))}"
 
         # try to open the url in the browser and copy it to the clipboard
         browser_label = "URL not opened in browser"
@@ -763,9 +818,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
         # convert the sorted rows to a human-readable string
         data_lines = ""
-        for (name, value) in zip(
-            [c.header_name for c in self._current_columns], row[0]
-        ):
+        for name, value in zip([c.header_name for c in self._current_columns], row[0]):
             # remove any tree characters
             if isinstance(value, ColouredText):
                 value = str(value.raw_text)  # type: ignore
@@ -812,7 +865,9 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             return
         # the minimum offset should be to the next top time
         min_offset = (
-            self._model.time_elapsed if self._model.time_elapsed is not nan else 1
+            self._model.get_time_elapsed(self._model.selected_machine)
+            if self._model.selected_machine is not None
+            else 5
         )
         offset = max(min_offset, abs(offset)) * (1 if offset > 0 else -1)
         self._model.timestamp += offset

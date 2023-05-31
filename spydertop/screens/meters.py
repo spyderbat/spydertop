@@ -12,35 +12,23 @@ the header meters.
 
 
 from math import nan
-from typing import Dict
+from typing import Dict, Optional
 from datetime import timedelta
 
 from spydertop.model import AppModel
-from spydertop.utils import add_palette, header_bytes
+from spydertop.utils import add_palette, header_bytes, sum_element_wise
 
 # --- Disk IO Meter ---
 
 
-def sum_disks(disks: Dict[str, Dict[str, int]]):
+def sum_disks(disks: Dict[str, Dict[str, int]]) -> Dict[str, int]:
     """Sums the values of disk reads and writes for all disks, ignoring the
     duplicates or invalid disks"""
     # see https://github.com/htop-dev/htop/blob/main/linux/Platform.c#L578-L593 for reference
     prev_disk_name = ""
-    totals: Dict[str, int] = {
-        "io_time_ms": 0,
-        "ios_in_progress": 0,
-        "read_completed": 0,
-        "read_time_ms": 0,
-        "reads_merged": 0,
-        "sectors_read": 0,
-        "sectors_written": 0,
-        "weighted_io_time_ms": 0,
-        "write_time_ms": 0,
-        "writes_completed": 0,
-        "writes_merged": 0,
-    }
+    filtered_disks = {}
 
-    for (disk_name, values) in disks.items():
+    for disk_name, values in disks.items():
         # ignore these disks
         if disk_name.startswith("dm-") or disk_name.startswith("zram"):
             continue
@@ -50,25 +38,22 @@ def sum_disks(disks: Dict[str, Dict[str, int]]):
             continue
 
         prev_disk_name = disk_name
+        filtered_disks[disk_name] = values
 
-        for (key, val) in values.items():
-            if key not in totals:
-                totals[key] = 0
-            totals[key] += val
-    return totals
+    return sum_element_wise(filtered_disks.values())  # type: ignore
 
 
-def show_disk_io(model: AppModel):
+def get_disk_values(model: AppModel, muid: str):
     """Generates the string for the disk IO meter"""
     # modeled after https://github.com/htop-dev/htop/blob/main/DiskIOMeter.c#L34-L108
-    disk = model.get_value("disk")
-    prev_disk = model.get_value("disk", previous=True)
+    disk = model.get_value("disk", muid)
+    prev_disk = model.get_value("disk", muid, previous=True)
     if disk is None or prev_disk is None:
-        return add_palette("  ${{{meter_label}}}Disk I/O: ${{1,1}}No Data", model)
+        return None
     disk_count = len(disk.keys()) + 0.00000001
     disk = sum_disks(disk)
     prev_disk = sum_disks(prev_disk)
-    time_elapsed_ms = model.time_elapsed * 1000
+    time_elapsed_ms = model.get_time_elapsed(muid) * 1000
     percent_used = round(
         (disk["io_time_ms"] - prev_disk["io_time_ms"])
         / time_elapsed_ms
@@ -76,53 +61,101 @@ def show_disk_io(model: AppModel):
         * 100,
         1,
     )
-    read_bytes = header_bytes((disk["sectors_read"] - prev_disk["sectors_read"]) * 512)
-    write_bytes = header_bytes(
-        (disk["sectors_written"] - prev_disk["sectors_written"]) * 512
-    )
+    read_bytes = (disk["sectors_read"] - prev_disk["sectors_read"]) * 512
+    write_bytes = (disk["sectors_written"] - prev_disk["sectors_written"]) * 512
+    return {
+        "percent_used": percent_used,
+        "read_bytes": read_bytes,
+        "write_bytes": write_bytes,
+    }
+
+
+def show_disk_io(model: AppModel):
+    """Generates the string for the network meter"""
+    values: Optional[Dict[str, int]] = None
+    if model.selected_machine is not None:
+        values = get_disk_values(model, model.selected_machine)
+    else:
+        net_values = [get_disk_values(model, muid) for muid in model.machines.keys()]
+        filtered = [n for n in net_values if n is not None]
+        if len(filtered) > 0:
+            values = sum_element_wise(filtered)  # type: ignore
+        else:
+            values = None
+
+    if values is None:
+        return add_palette("  ${{{meter_label}}}Disk I/O: ${{1,1}}No Data", model)
+
     return add_palette(
         "  ${{{meter_label}}}Disk IO: ${{{meter_label},1}}{percent_used}% ${{{meter_label}}}\
 read: ${{2}}{read_bytes} ${{{meter_label}}}write ${{4}}{write_bytes}",
         model,
-        percent_used=percent_used,
-        read_bytes=read_bytes,
-        write_bytes=write_bytes,
+        percent_used=values["percent_used"],
+        read_bytes=header_bytes(values["read_bytes"]),
+        write_bytes=header_bytes(values["write_bytes"]),
     )
 
 
 # --- Network Meter ---
 
 
-def show_network(model: AppModel):
-    """Generates the string for the network meter"""
-    network_totals = model.get_value("network")
-    prev_net_totals = model.get_value("network", previous=True)
+def get_network_values(model: AppModel, muid: str):
+    """Gets the network values for a given machine"""
+    network_totals = model.get_value("network", muid)
+    prev_net_totals = model.get_value("network", muid, previous=True)
     if network_totals is None or prev_net_totals is None:
-        return add_palette("  ${{{meter_label}}}Network: ${{1,1}}No Data", model)
+        return None
     network_totals = network_totals["total"]
     prev_net_totals = prev_net_totals["total"]
-    time_elapsed_sec = model.time_elapsed
-    rx_bytes = header_bytes(
-        (network_totals["bytes_rx"] - prev_net_totals["bytes_rx"]) / time_elapsed_sec
-    )
-    tx_bytes = header_bytes(
-        (network_totals["bytes_tx"] - prev_net_totals["bytes_tx"]) / time_elapsed_sec
-    )
+    time_elapsed_sec = model.get_time_elapsed(muid)
+    rx_bytes = (
+        network_totals["bytes_rx"] - prev_net_totals["bytes_rx"]
+    ) / time_elapsed_sec
+
+    tx_bytes = (
+        network_totals["bytes_tx"] - prev_net_totals["bytes_tx"]
+    ) / time_elapsed_sec
+
+    reads = network_totals["reads"] - prev_net_totals["reads"]
+    writes = network_totals["writes"] - prev_net_totals["writes"]
+
+    return {
+        "rx_bytes": rx_bytes,
+        "tx_bytes": tx_bytes,
+        "reads": reads,
+        "writes": writes,
+    }
+
+
+def show_network(model: AppModel):
+    """Generates the string for the network meter"""
+    values: Optional[Dict[str, int]] = None
+    if model.selected_machine is not None:
+        values = get_network_values(model, model.selected_machine)
+    else:
+        net_values = [get_network_values(model, muid) for muid in model.machines.keys()]
+        filtered = [n for n in net_values if n is not None]
+        if len(filtered) > 0:
+            values = sum_element_wise(filtered)  # type: ignore
+        else:
+            values = None
+
+    if values is None:
+        return add_palette("  ${{{meter_label}}}Network: ${{1,1}}No Data", model)
+    rx_bytes = header_bytes(values["rx_bytes"])
+    tx_bytes = header_bytes(values["tx_bytes"])
     if not (tx_bytes[-1]).isdigit():
         tx_bytes += "i"
     if not (rx_bytes[-1]).isdigit():
         rx_bytes += "i"
-    reads = network_totals["reads"] - prev_net_totals["reads"]
-    writes = network_totals["writes"] - prev_net_totals["writes"]
-
     return add_palette(
         "  ${{{meter_label}}}Network: rx: ${{2}}{rx}b/s ${{{meter_label}}}\
 write: ${{4}}{tx}b/s ${{{meter_label}}}({reads}/{writes} reads/writes)",
         model,
         rx=rx_bytes,
         tx=tx_bytes,
-        reads=reads,
-        writes=writes,
+        reads=values["reads"],
+        writes=values["writes"],
     )
 
 
@@ -131,18 +164,23 @@ write: ${{4}}{tx}b/s ${{{meter_label}}}({reads}/{writes} reads/writes)",
 
 def show_tasks(model: AppModel):
     """Generates the string for the task meter"""
-    tasks = model.get_value("tasks")
+    tasks = model.get_value("tasks", muid=None)
     if tasks is None:
         return add_palette("  ${{{meter_label}}}Tasks: ${{1,1}}No Data", model)
     # this is necessary because of how tasks seem to be counted
-    processes = model.get_value("processes")
-    if processes is None:
+    processes = 0
+    muids = (
+        [model.selected_machine] if model.selected_machine else model.machines.keys()
+    )
+    for muid in muids:
+        processes += len(model.get_value("processes", muid) or [])
+    if processes == 0:
         task_count = "${1,1}Not Available"
     else:
-        task_count = len(processes) - tasks["kernel_threads"]
-    running = tasks["running"]
-    threads = tasks["total_threads"] - tasks["kernel_threads"]
-    kthreads = tasks["kernel_threads"]
+        task_count = processes - tasks["kernel_threads"]
+    running = tasks.get("running", 0)
+    kthreads = tasks.get("kernel_threads", 0)
+    threads = tasks.get("total_threads", 0) - kthreads
 
     thread_style = "${8,1}" if model.config["hide_threads"] else "${2,1}"
     thread_lbl_style = (
@@ -177,10 +215,15 @@ def show_tasks(model: AppModel):
 
 def show_ld_avg(model: AppModel):
     """Generates the string for the load average meter"""
-    ld_avg = model.get_value("load_avg")
+    ld_avg = model.get_value("load_avg", muid=None)
+    num_machines = len(model.machines) if model.selected_machine is None else 1
 
     if ld_avg is None or len(ld_avg) == 0:
         return add_palette("  ${{{meter_label}}}Load average: ${{1,1}}No Data", model)
+
+    for i, load in enumerate(ld_avg):
+        ld_avg[i] = f"{float(load) / num_machines:.2f}"
+
     if len(ld_avg) == 1:
         return add_palette(
             "  ${{{meter_label}}}Load average: ${{{background},1}}{ld_avg[0]}, ${{1,1}}No Data",
@@ -203,23 +246,23 @@ ${{{meter_label},1}}{ld_avg[1]} ${{{meter_label}}}{ld_avg[2]}",
 # --- CPU Meter ---
 
 
-def update_cpu(i, model: AppModel):
+def update_cpu(i, model: AppModel, muid: str):
     """Determines the values for use in the CPU meter"""
     # reference: https://github.com/htop-dev/htop/blob/main/linux/Platform.c#L312-L346
-    cpu = model.get_value("cpu_time")
-    prev_cpu = model.get_value("cpu_time", previous=True)
+    cpu = model.get_value("cpu_time", muid)
+    prev_cpu = model.get_value("cpu_time", muid, previous=True)
     if (
         cpu is None
         or prev_cpu is None
         or f"cpu{i}" not in cpu
         or f"cpu{i}" not in prev_cpu
     ):
-        return None
+        return [0, 0, 0, 0]
     cpu = cpu[f"cpu{i}"]
     prev_cpu = prev_cpu[f"cpu{i}"]
 
-    time_elapsed_sec = model.time_elapsed
-    clk_tck = model.get_value("clk_tck") or nan
+    time_elapsed_sec = model.get_time_elapsed(muid)
+    clk_tck = model.get_value("clk_tck", muid) or nan
     values = [0, 0, 0, 0]
     values[0] = (cpu["nice_time"] - prev_cpu["nice_time"]) / clk_tck / time_elapsed_sec
     values[1] = (
@@ -292,10 +335,12 @@ def update_swap(model: AppModel):
 
 def show_uptime(model: AppModel):
     """Generates the string for the uptime meter"""
-    mach = model.machine
-    if mach is None:
+    uptime = ", ".join(
+        str(timedelta(seconds=model.timestamp - mach["boot_time"]))
+        for mach in model.machines.values()
+    )
+    if len(uptime) == 0:
         return add_palette("  ${{{meter_label}}}Uptime: ${{1,1}}No Data", model)
-    uptime = timedelta(seconds=model.timestamp - mach["boot_time"])
     return add_palette(
         "  ${{{meter_label}}}Uptime: ${{{background},1}}{uptime}",
         model,

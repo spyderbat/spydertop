@@ -19,9 +19,9 @@ from asciimatics.widgets import Widget
 from asciimatics.parsers import Parser
 from asciimatics.strings import ColouredText
 from spydertop.constants.columns import Column
+from spydertop.utils import align_with_overflow
 
-from spydertop.utils.types import Alignment, ExtendedParser
-from spydertop.constants import COLOR_REGEX
+from spydertop.utils.types import ExtendedParser
 from spydertop.model import AppModel, Tree
 from spydertop.config import Config
 
@@ -34,8 +34,9 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
     handles the sorting, filtering, and display of the records.
     """
 
-    tree: Tree
+    tree: Optional[Tree]
 
+    header_enabled: bool = True
     columns: List[Column] = []
     _rows: List[InternalRow] = []
     _filtered_rows: List[InternalRow] = []
@@ -48,7 +49,11 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
     _horizontal_offset: int = 0
 
     def __init__(
-        self, model: AppModel, tree: Tree, name="Table", parser=ExtendedParser()
+        self,
+        model: AppModel,
+        tree: Optional[Tree],
+        name="Table",
+        parser=ExtendedParser(),
     ):
         super().__init__(
             name, tab_stop=True, disabled=False, on_focus=None, on_blur=None
@@ -89,37 +94,41 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
             self.value = len(self._filtered_rows) - 1
 
         # first, print the header
-        offset = -self._horizontal_offset
-        for col in self.columns:
-            if col.header_name == self._config["sort_column"]:
-                color, attr, background = self._frame.palette.get(
-                    "table_header_selected", self._frame.palette["selected_focus_field"]
-                )
-                arrow = "↑" if self._config["sort_ascending"] else "↓"
-            else:
-                color, attr, background = self._frame.palette.get(
-                    "table_header", self._frame.palette["title"]
-                )
-                arrow = ""
-            width = col.max_width
-            if width == 0:
-                width = max(self._w - offset, 1)
+        if self.header_enabled:
+            offset = -self._horizontal_offset
+            for col in self.columns:
+                if col.header_name == self._config["sort_column"]:
+                    color, attr, background = self._frame.palette.get(
+                        "table_header_selected",
+                        self._frame.palette["selected_focus_field"],
+                    )
+                    arrow = "↑" if self._config["sort_ascending"] else "↓"
+                else:
+                    color, attr, background = self._frame.palette.get(
+                        "table_header", self._frame.palette["title"]
+                    )
+                    arrow = ""
+                width = col.max_width
+                if width == 0:
+                    width = max(self._w - offset, 1)
 
-            assert width > 0
+                assert width > 0
 
-            if col.enabled:
-                self._frame.canvas.paint(
-                    f"{col.header_name+arrow:{col.align}{width}} ",
-                    self._x + offset,
-                    self._y,
-                    color,
-                    attr,
-                    background,
-                )
-                offset += width + 1
+                if col.enabled:
+                    self._frame.canvas.paint(
+                        f"{col.header_name+arrow:{col.align}{width}} ",
+                        self._x + offset,
+                        self._y,
+                        color,
+                        attr,
+                        background,
+                    )
+                    offset += width + 1
+            y_offset = 1
+        else:
+            y_offset = 0
 
         # then, print the rows
-        y_offset = 1
         for i in range(self._vertical_offset, self._vertical_offset + self._h - 1):
             if i >= len(self._filtered_rows) or i < 0:
                 break
@@ -147,23 +156,11 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                     line = str(displayable_row[j]).replace("\n", " ")
                     # first, the space needed to pad the text to the correct alignment
                     # is calculated.
-                    extra_space = width - len(re.sub(COLOR_REGEX, "", str(line)))
-                    left_space = (
-                        0
-                        if col.align == Alignment.LEFT
-                        else extra_space // 2
-                        if col.align == Alignment.CENTER
-                        else extra_space
-                    )
-                    spaces = " " * left_space
-                    right_spaces = " " * (extra_space - left_space + 1)
-                    line = f"{spaces}{line}{right_spaces}"
+                    line = align_with_overflow(line, width, col.align)
                     # then, colors are added if needed.
                     line = ColouredText(line, self._parser) if self._parser else line
 
                     to_paint = str(line)
-                    if extra_space < 0:
-                        to_paint = to_paint[: width - 1] + "…"
                     # finally, the line is painted.
                     self._frame.canvas.paint(
                         to_paint + " ",
@@ -286,7 +283,11 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
 
         # if we are displaying a tree, we need to use the tree to sort
         # first, and to modify the command
-        if self._config["tree"] and self._config["tab"] == "processes":
+        if (
+            self._config["tree"]
+            and self._config["tab"] == "processes"
+            and self.tree is not None
+        ):
             # we need the columns to have an ID
             assert self.columns[0].header_name == "ID"
             # refactor cached sortable data to be indexed by id

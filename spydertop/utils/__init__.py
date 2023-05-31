@@ -10,11 +10,13 @@ Various utilities for spydertop
 """
 
 from datetime import datetime, timezone
-from typing import Callable, List, Optional, TypeVar
+import re
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, TypeVar, Union
 
 from asciimatics.widgets.utilities import THEMES
+from spydertop.constants import COLOR_REGEX
 
-from spydertop.utils.types import DelayedLog
+from spydertop.utils.types import Alignment, DelayedLog, Record
 
 global log  # pylint: disable=global-at-module-level,invalid-name
 # the global log object, used everywhere
@@ -140,3 +142,84 @@ def calculate_widths(screen_width, desired_columns: List[int]) -> List[int]:
     actual_widths = [int(x / total_desired * screen_width) for x in desired_columns]
     actual_widths[-1] += screen_width - sum(actual_widths)
     return actual_widths
+
+
+def sum_element_wise(
+    group: Union[Iterable[Dict[Any, int]], Iterable[List[int]], Iterable[Tuple[int]]]
+):
+    """Sums the values of a group of dicts, lists, or tuples, providing an element-wise sum"""
+    first = next(iter(group))
+    if isinstance(first, dict):
+        totals = {}
+        for values in group:
+            for key, val in values.items():  # type: ignore
+                if key not in totals:
+                    totals[key] = 0
+                totals[key] += val
+        return totals
+    if isinstance(first, list):
+        totals = [0] * len(first)
+        for values in group:
+            for i, val in enumerate(values):
+                totals[i] += val
+        return totals
+    if isinstance(first, tuple):
+        totals = [0] * len(first)
+        for values in group:
+            for i, val in enumerate(values):
+                totals[i] += val
+        return tuple(totals)
+    raise TypeError("Unsupported type")
+
+
+def align_with_overflow(
+    text: str,
+    width: int,
+    align: Alignment = Alignment.LEFT,
+    include_padding: bool = True,
+):
+    """Align text with a given width, and overflow if necessary"""
+    extra_space = width - len(re.sub(COLOR_REGEX, "", str(text)))
+    if extra_space <= 0:
+        # we need to only remove non-styling characters
+        coloring = re.findall(f"({COLOR_REGEX})", text)
+        # the regex that was used has 5 capturing groups, so we need to take every 6th element
+        non_color_text = re.split(COLOR_REGEX, text)[0::6]
+        total_length = 0
+        for i, nc_text in enumerate(non_color_text):
+            total_length += len(nc_text)
+            if total_length > width:
+                non_color_text = non_color_text[:i]
+                non_color_text.append(
+                    nc_text[: len(nc_text) - (total_length - width)] + "…"
+                )
+                break
+        text = "".join(
+            [
+                non_color_text[i] + coloring[i][0]
+                for i in range(min(len(non_color_text), len(coloring)))
+            ]
+            + [non_color_text[-1]]
+        )
+        return text
+    left_space = (
+        0
+        if align == Alignment.LEFT
+        else extra_space // 2
+        if align == Alignment.CENTER
+        else extra_space
+    )
+    spaces = " " * left_space
+    right_spaces = " " * (extra_space - left_space + 1) if include_padding else ""
+    text = f"{spaces}{text}{right_spaces}"
+
+    return text
+
+
+def get_machine_short_name(machine: Record) -> str:
+    """Get a short name for a machine"""
+    if machine["cloud_tags"] and "Name" in machine["cloud_tags"]:
+        if "k8s" in "".join(list(machine["cloud_tags"].keys())):
+            return "node:" + machine["hostname"]
+        return machine["cloud_tags"]["Name"]
+    return machine["hostname"]

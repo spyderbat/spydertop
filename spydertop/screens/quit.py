@@ -87,7 +87,6 @@ class QuitFrame(Frame):
                     lambda: """\
 Have you enjoyed using Spydertop?
 """,
-                    align="<",
                 )
             )
 

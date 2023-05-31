@@ -58,7 +58,6 @@ Contact:
                     model,
                 ),
                 parser=ExtendedParser(),
-                align="<",
             )
         )
 
@@ -75,7 +74,6 @@ Helpful Links:
                     model,
                 ),
                 parser=ExtendedParser(),
-                align="<",
             ),
             column=1,
         )
@@ -96,7 +94,6 @@ yourself is essential to helping us improve and create a better experience \
 for all. Thank you!
 """,
                 parser=ExtendedParser(),
-                align="<",
             )
         )
 

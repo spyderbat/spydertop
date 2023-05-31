@@ -4,7 +4,48 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 
+[tool.setuptools]
+packages = ["spydertop"]
+
 [tool.pyright]
 include = ["spydertop"]
 platform = "All"
 useLibraryCodeForTypes = true
+# pythonVersion = "3.7"
+
+[tool.pylint.typecheck]
+generated-members = ["orjson.*"]
+
+[project]
+name = "spydertop"
+description = "A tool that provides htop-like functionality for any point in time."
+readme = "README.md"
+requires-python = ">=3.7"
+license = { file = "LICENSE" }
+authors = [{ name = "Griffith Thomas", email = "dev@spyderbat.com" }]
+maintainers = [{ name = "Spyderbat", email = "dev@spyderbat.com" }]
+keywords = ["spydertop", "spyderbat", "htop", "top"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+]
+dependencies = [
+    "asciimatics",
+    "click",
+    "pyyaml",
+    "pyperclip",
+    "urllib3",
+    "orjson",
+    "importlib-metadata >= 1.0; python_version < \"3.8\"",
+]
+dynamic = ["version"]
+
+[project.urls]
+Source = "https://github.com/spyderbat/spydertop"
+Spyderbat = "https://www.spyderbat.com/"
+Docker = "https://hub.docker.com/r/spyderbat/spydertop"
+
+[project.scripts]
+spydertop = "spydertop:cli"

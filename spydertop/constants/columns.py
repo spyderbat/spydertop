@@ -13,8 +13,9 @@ The Column class is used to define the columns that are displayed in the table.
 """
 
 from datetime import datetime, timedelta, timezone
-import json
 from typing import Any, Dict, List, Optional, Type, Callable, TYPE_CHECKING
+
+import orjson
 
 from spydertop.utils import (
     get_timezone,
@@ -113,8 +114,8 @@ def get_cpu_per(model: AppModel, process: Record):
     prev_record = get_resource_record(model, process, previous=True)
     if record is None or prev_record is None:
         return None
-    time_delta = model.time_elapsed
-    clk_tck = model.get_value("clk_tck")
+    time_delta = model.get_time_elapsed(muid=process["muid"])
+    clk_tck = model.get_value("clk_tck", muid=process["muid"])
     cpu = (
         record["utime"] - prev_record["utime"] + record["stime"] - prev_record["stime"]
     )
@@ -144,7 +145,7 @@ def get_time_plus_value(model: AppModel, process: Record):
     record = get_resource_record(model, process)
     if record is None:
         return None
-    clk_tck = model.get_value("clk_tck")
+    clk_tck = model.get_value("clk_tck", muid=process["muid"])
     cpu = record["utime"] + record["stime"]
     time = cpu / clk_tck
     return timedelta(seconds=time)
@@ -163,7 +164,11 @@ def color_cmd(_m, process: Record, args: List[str]):
 
 def format_environ(_m, _p, environ: Dict[str, str]):
     """Format the environment of a process"""
-    environ_lines = json.dumps(environ, indent=4, sort_keys=True).split("\n")
+    environ_lines = (
+        orjson.dumps(environ, option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS)
+        .decode()
+        .split("\n")
+    )
     if len(environ_lines) > 10:
         environ_lines = environ_lines[:9] + ["    ... <remaining values hidden>"]
     return "\n".join(environ_lines)
@@ -183,7 +188,7 @@ def get_resource_record(
     model: AppModel, process_record: Record, previous=False
 ) -> Optional[Record]:
     """Returns the resource record for the process"""
-    process_table = model.get_value("processes", previous)
+    process_table = model.get_value("processes", process_record["muid"], previous)
     if process_table is None:
         return None
     default_values = process_table["default"]
@@ -199,6 +204,7 @@ PROCESS_COLUMNS = [
     Column("NAME", 15, str, enabled=False),
     Column("PPID", 7, int, enabled=False),
     Column("PID", 7, int),
+    Column("MUID", 16, str, enabled=False),
     Column(
         "USER",
         9,
@@ -582,8 +588,8 @@ LISTENING_SOCKET_COLUMNS = [
 def get_system(model: AppModel, cont: Record) -> Optional[str]:
     """Get the system name for a container."""
     muid = cont["muid"]
-    machine_rec = model.machine
-    if machine_rec is not None and muid == machine_rec["id"]:
+    machine_rec = model.machines[muid]
+    if machine_rec is not None:
         return machine_rec["hostname"]
     return None
 
@@ -599,7 +605,7 @@ def format_mounts(_m: AppModel, _c: Record, mounts: List[Record]) -> str:
 def format_networks(_m: AppModel, _c: Record, networks: dict) -> str:
     """Format the networks for a container."""
     return "\n".join(
-        f"{key}: {json.dumps(value)}" for key, value in networks.items() if value
+        f"{key}: {orjson.dumps(value)}" for key, value in networks.items() if value
     )
 
 

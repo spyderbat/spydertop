@@ -10,6 +10,7 @@ Custom or modified types for use in the application.
 """
 
 import bisect
+from datetime import datetime
 from enum import Enum
 import re
 from textwrap import TextWrapper
@@ -28,6 +29,12 @@ RecordInternal = NewType("RecordInternal", Any)
 Record = NewType("Record", Dict[str, RecordInternal])
 
 
+class APIError(Exception):
+    """
+    An error that occurs when communicating with the API
+    """
+
+
 # custom types for adding context to values and formatting
 class Bytes:
     """A class for formatting bytes in a human readable format"""
@@ -42,7 +49,7 @@ class Bytes:
 
     def __str__(self) -> str:
         n_bytes = self.value
-        for (suffix, color) in [("", None), ("K", None), ("M", 6), ("G", 2), ("T", 1)]:
+        for suffix, color in [("", None), ("K", None), ("M", 6), ("G", 2), ("T", 1)]:
             if n_bytes < 1000:
                 if suffix in {"K", ""}:
                     return f"{int(n_bytes)}{suffix}"
@@ -50,6 +57,33 @@ class Bytes:
                 return f"${{{color}}}{n_bytes:.{precision}f}{suffix}"
             n_bytes /= 1024
         return f"${{1,1}}{n_bytes}P"
+
+    def __eq__(self, __value: object) -> bool:
+        if isinstance(__value, Bytes):
+            return self.value == __value.value
+        if isinstance(__value, int):
+            return self.value == __value
+        if isinstance(__value, str):
+            return self.value == Bytes.parse_bytes(__value)
+        return False
+
+    def __lt__(self, __value: object) -> bool:
+        if isinstance(__value, Bytes):
+            return self.value < __value.value
+        if isinstance(__value, int):
+            return self.value < __value
+        if isinstance(__value, str):
+            return self.value < Bytes.parse_bytes(__value)
+        return False
+
+    def __le__(self, __value: object) -> bool:
+        return self < __value or self == __value
+
+    def __gt__(self, __value: object) -> bool:
+        return not self <= __value
+
+    def __ge__(self, __value: object) -> bool:
+        return not self < __value
 
     @staticmethod
     def parse_bytes(value: str) -> int:
@@ -141,7 +175,7 @@ class DelayedLog:
     interfere with any normal logging method.
     """
 
-    _logs: List[Tuple[int, str]] = []
+    _logs: List[Tuple[int, str, datetime]] = []
     log_level: int
     logger: Optional[logging.Logger] = None
 
@@ -150,17 +184,10 @@ class DelayedLog:
     INFO = logging.INFO
     WARN = logging.WARN
     ERR = logging.ERROR
-    LOG_FG_COLORS = {
-        logging.DEBUG - 1: "white",
-        logging.DEBUG: "black",
-        logging.INFO: "black",
-        logging.WARN: "black",
-        logging.ERROR: "black",
-    }
-    LOG_BG_COLORS = {
+    LOG_COLORS = {
         logging.DEBUG - 1: "black",
         logging.DEBUG: "blue",
-        logging.INFO: "white",
+        logging.INFO: "cyan",
         logging.WARN: "yellow",
         logging.ERROR: "red",
     }
@@ -173,28 +200,31 @@ class DelayedLog:
         """Initialize logging for development purposes, saving to a file."""
         logging.basicConfig(level=self.log_level, filename="spydertop.log")
         self.logger = logging.getLogger("spydertop")
+        # disable noisy logging for asciimatics
+        logging.getLogger("asciimatics").setLevel(logging.WARNING)
 
     def dump(self):
         """Print all logs to the console."""
-        for (level, log_lines) in self._logs:
-            for line in log_lines.split("\n"):
-                click.echo(
-                    click.style(
-                        f"[{logging.getLevelName(level)}]",
-                        fg=self.LOG_FG_COLORS.get(level, None),
-                        bg=self.LOG_BG_COLORS.get(level, None),
-                    ),
-                    nl=False,
-                )
-                click.echo(f": {line}")
+        for level, log_lines, time in self._logs:
+            if level >= self.log_level:
+                for line in log_lines.split("\n"):
+                    click.echo(
+                        click.style(
+                            f"[{logging.getLevelName(level)}]".ljust(9),
+                            fg=self.LOG_COLORS.get(level, None),
+                        ),
+                        nl=False,
+                    )
+                    click.echo(time.strftime("%H:%M:%S") + " " + line)
         self._logs = []
 
     def log(self, *messages: Any, log_level: int = logging.NOTSET):
         """Log a message to the console, by default at DEBUG level."""
+        line = " ".join([str(_) for _ in messages])
+        time = datetime.now()
         if self.logger is not None:
-            self.logger.log(log_level, " ".join([str(_) for _ in messages]))
-        if log_level >= self.log_level:
-            self._logs.append((log_level, " ".join([str(_) for _ in messages])))
+            self.logger.log(log_level, "%.3f %s", time.timestamp(), line)
+        self._logs.append((log_level, line, time))
 
     def debug(self, *messages: Any):
         """Log an info message to the console."""
@@ -226,10 +256,14 @@ class DelayedLog:
     def __del__(self):
         self.dump()
 
-    @property
-    def lines(self) -> List[str]:
+    def get_last_line(self, log_level: Optional[int] = None) -> str:
         """All logs within the log level as a list"""
-        return [line for level, line in self._logs if level >= self.log_level]
+        if log_level is None:
+            log_level = self.log_level
+        filtered_logs = [line for level, line, _ in self._logs if level >= log_level]
+        if filtered_logs:
+            return filtered_logs[-1]
+        return ""
 
 
 class CustomTextWrapper(TextWrapper):
@@ -342,7 +376,7 @@ class CustomTextWrapper(TextWrapper):
                     cur_line.append(cur_style)
                     chunks[-1] = chunks[-1][len(color_match.group()) :]
                 self._handle_long_word(chunks, cur_line, cur_len, width)
-                cur_len = sum(map(len, cur_line))
+                cur_len = sum(map(len, cur_line), 0)
 
             # -- from standard implementation --
 

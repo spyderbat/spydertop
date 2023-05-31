@@ -16,7 +16,7 @@ from asciimatics.exceptions import NextScene, StopApplication
 from asciimatics.event import KeyboardEvent
 
 from spydertop.model import AppModel
-from spydertop.utils.types import ExtendedParser
+from spydertop.utils.types import Alignment, ExtendedParser
 from spydertop.widgets import Padding, FuncLabel
 
 
@@ -51,7 +51,7 @@ class FailureFrame(Frame):
  ${1,1}⠟⠻ ⠇⠸ ⠣⠜ ⠣⠜ ⡧⠜ ⠭⠕ ⠅
  
  Something went wrong, and I can't fix it:""",
-                align="^",
+                align=Alignment.CENTER,
                 parser=ExtendedParser(),
             )
         )
@@ -59,7 +59,7 @@ class FailureFrame(Frame):
         layout.add_widget(
             FuncLabel(
                 lambda: f"${{1,1}}{model.failure_reason}",
-                align="^",
+                align=Alignment.CENTER,
                 parser=ExtendedParser(),
             )
         )
@@ -67,7 +67,7 @@ class FailureFrame(Frame):
         layout.add_widget(
             FuncLabel(
                 lambda: "What do you want to do?",
-                align="^",
+                align=Alignment.CENTER,
             )
         )
         layout.add_widget(Padding(2))

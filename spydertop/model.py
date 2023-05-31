@@ -10,26 +10,20 @@ The main app model for the application, containing all logic necessary
 to fetch and cache data from the Spyderbat API
 """
 
+from itertools import groupby
 import threading
-import json
 import gzip
-from math import nan
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Dict, Optional, Set, List, Any, Tuple, Union
+from typing import Callable, Dict, Optional, List, Any, Tuple
 import uuid
 
-import spyderbat_api
-from spyderbat_api.api import (
-    source_data_api,
-    org_api,
-    source_api,
-)
+import orjson
 import urllib3
-from urllib3.exceptions import MaxRetryError
 
 from spydertop.config import Config
-from spydertop.utils import get_timezone, log
-from spydertop.utils.types import Record, Tree, TimeSpanTracker
+from spydertop.recordpool import RecordPool
+from spydertop.utils import get_timezone, log, sum_element_wise
+from spydertop.utils.types import APIError, Record, Tree
 from spydertop.utils.cursorlist import CursorList
 from spydertop.constants import API_LOG_TYPES
 
@@ -41,54 +35,40 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
     provides a collection of quick methods to get data from the model.
     """
 
-    loaded: bool = False
     failed: bool = False
     failure_reason: str = ""
-    progress: float = 0
     config: Config
     columns_changed: bool = False
     thread: Optional[threading.Thread] = None
-    api_client: Optional[spyderbat_api.ApiClient] = None
+    selected_machine: Optional[str] = None
 
     # cache for arbitrary states, registered through
     # register_state
     _cache: Dict[str, Dict[str, Any]] = {}
 
-    _timestamp: Optional[float]
-    _time_elapsed: float = 0
+    _timestamp: Optional[float] = None
     _last_good_timestamp: Optional[float] = None
-    _time_span_tracker: TimeSpanTracker = TimeSpanTracker()
     _session_id: str
     _http_client: urllib3.PoolManager
 
-    _records: Dict[str, Dict[str, Record]] = {
-        "model_process": {},
-        "model_session": {},
-        "model_connection": {},
-        "model_machine": {},
-        "model_listening_socket": {},
-        "event_redflag": {},
-        "model_container": {},
-    }
+    _record_pool: RecordPool
+
     _tree: Optional[Tree] = None
-    _top_ids: Set[str] = set()
-    _tops: CursorList
-    _machine: Optional[Record] = None
-    _meminfo: Optional[Dict[str, int]] = None
+    # the event_top records grouped by machine
+    _tops: Dict[str, CursorList] = {}
+    # memory information for the current time, grouped by machine
+    # meminfo may not be available for every time
+    _meminfo: Dict[str, Optional[Dict[str, int]]] = {}
 
     def __init__(self, config: Config) -> None:
         self.config = config
-        self._timestamp = None
         self._session_id = uuid.uuid4().hex
         self._http_client = urllib3.PoolManager()
-
-        self._tops = CursorList("time", [], self._timestamp)
+        self._record_pool = RecordPool(config)
 
     def __del__(self):
         if self.thread:
             self.thread.join()
-        if self.api_client:
-            self.api_client.close()
 
     def init(self) -> None:
         """Initialize the model, loading data from the source. Requires config to be complete"""
@@ -98,13 +78,12 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
             else None
         )
 
-        if self.api_client is None:
-            self.init_api()
+        self._record_pool.init_api()
 
         if not self.config.is_complete:
             # ideally, this would never happen, as the configuration screen
             # should complete the configuration before the model is initialized
-            raise Exception("Configuration is incomplete, cannot load data")
+            raise RuntimeError("Configuration is incomplete, cannot load data")
 
         def guard():
             try:
@@ -121,60 +100,9 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
         if self.config.output and self.config.output.name.endswith(".gz"):
             self.config.output = gzip.open(self.config.output.name, "wt")
 
-    def init_api(self) -> None:
+    def init_api(self):
         """Initialize the API client"""
-        if isinstance(self.config.input, str):
-            configuration = spyderbat_api.Configuration(
-                access_token=self.config.api_key, host=self.config.input
-            )
-
-            self.api_client = spyderbat_api.ApiClient(configuration)
-
-    def load_from_api(
-        self,
-        api_instance: source_data_api.SourceDataApi,
-        input_data: dict,
-        datatype: str,
-    ) -> bytes:
-        """Load data from the API with a specified type"""
-        log.debug({"org_uid": self.config.org, "dt": datatype, **input_data})
-        try:
-            api_response: urllib3.HTTPResponse = api_instance.src_data_query_v2(
-                org_uid=self.config.org,
-                dt=datatype,
-                **input_data,
-                _preload_content=False,
-            )
-            newline = b"\n"
-            log.debug(
-                f"Context-uid in response: {api_response.headers.get('x-context-uid', None)}, \
-status: {api_response.status}, size: {len(api_response.data.split(newline))}"
-            )
-        except spyderbat_api.ApiException as exc:
-            self.fail(f"Loading data from the api failed with reason: {exc.reason}")
-            log.traceback(exc)
-            log.debug(
-                f"""\
-Debug info:
-URL requested: {self.config.input}/api/v1/source/query/
-Method: POST
-Input data: {input_data}
-Data type: {datatype}
-Status code: {exc.status}
-Reason: {exc.reason}
-Body: {exc.body}
-Context-UID: {exc.headers.get("x-context-uid", None) if exc.headers else None}\
-"""
-            )
-            return b""
-        except MaxRetryError as exc:
-            self.fail(
-                f"There was an issue trying to connect to the API. \
-Is the url {self.config.input} correct?"
-            )
-            log.traceback(exc)
-            return b""
-        return api_response.data
+        self._record_pool.init_api()
 
     def load_data(
         self,
@@ -183,123 +111,34 @@ Is the url {self.config.input} correct?"
         before=timedelta(seconds=120),
     ) -> None:
         """Load data from the source, either the API or a file, then process it"""
-        self.loaded = False
-        if duration is None:
-            duration = self.config.start_duration
-        log.info(f"Loading data for time: {timestamp} and duration: {duration}")
-        self.loaded = False
-        self.progress = 0.0
-
-        source = self.config.input
-        lines = []
-
-        if isinstance(source, str):
-            # url, load data from api
-
-            if timestamp is None:
-                self.fail("No start time specified")
-                return
-
-            api_instance = source_data_api.SourceDataApi(self.api_client)
-            input_data = {
-                # request data from a bit earlier, so that the information is properly filled out
-                "st": timestamp - before.total_seconds() + 30,
-                "et": timestamp + duration.total_seconds(),
-                "src": self.config.machine,
-            }
-
-            # we need more than one event_top record, so a buffer of 30 seconds is used
-            # to make sure the data is available
-            self._time_span_tracker.add_time_span(
-                input_data["st"] + 30, input_data["et"]
+        try:
+            self._record_pool.load(timestamp, duration, before)
+            log.debug(
+                "Loaded Items: ",
+                {key: len(value) for key, value in self._record_pool.records.items()},
             )
-
-            lines += self.load_from_api(api_instance, input_data, "spydergraph").split(
-                b"\n"
-            )
-            lines += self.load_from_api(api_instance, input_data, "htop").split(b"\n")
-            lines += self.load_from_api(api_instance, input_data, "k8s").split(b"\n")
-        else:
-            # file, read in records and parse
-            log.info(f"Reading records from input file: {source.name}")
-
-            lines = source.readlines()
-            if len(lines) == 0:
-                # file was most likely already read
-                self.fail(
-                    "The current time is unloaded, but input is from a file. \
-No more records can be loaded."
-                )
-                return
-            self.log_api(
-                API_LOG_TYPES["loaded_data"], {"source_id": "file", "count": len(lines)}
-            )
-
-        if self.config.output:
-            # if lines is still binary, convert to text
-            if len(lines) > 0 and isinstance(lines[0], bytes):
-                lines = [line.decode("utf-8") for line in lines]  # type: ignore
-            self.config.output.write("\n".join([l.rstrip() for l in lines]))
-
-        self._process_records(lines)
-
-    def _process_records(self, lines: List[str]) -> None:
-        """Process the loaded records, parsing them and adding them to the model"""
-        log.info("Parsing records")
-        self.progress = 0.0
-
-        if not lines or len(lines) == 0 or lines[0] == "" or lines[0] == b"":
-            self.fail(
-                "Loading was successful, but no records were found. \
-Are you asking for the wrong time?"
-            )
+        except (RuntimeError, APIError) as exc:
+            log.traceback(exc)
+            self.fail(str(exc))
+            return
+        except Exception as exc:  # pylint: disable=broad-except
+            # fallback case; we don't want to crash the app if something
+            # unexpected happens
+            log.warn("An unexpected type of exception occurred while loading data")
+            log.traceback(exc)
+            self.fail(str(exc))
             return
 
-        event_tops = []
-
-        for i, line in enumerate(lines):
-            self.progress = i / len(lines)
-
-            # suppress errors for empty lines
-            if line.strip() == "":
-                continue
-
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError as exc:
-                log.err(f"Error decoding record: {line}")
-                log.traceback(exc)
-                continue
-
-            if record["schema"].startswith("event_top"):
-                if record["id"] in self._top_ids:
-                    continue
-                self._top_ids.add(record["id"])
-                event_tops.append(record)
-            if record["schema"].startswith("model_container"):
-                self._records["model_container"][record["container_id"]] = record
-            else:
-                short_schema = record["schema"].split(":")[0]
-
-                if short_schema not in self._records:
-                    continue
-
-                # only save the most recent version of each record
-                if record["id"] not in self._records[short_schema]:
-                    self._records[short_schema][record["id"]] = record
-                else:
-                    if (
-                        record["time"]
-                        > self._records[short_schema][record["id"]]["time"]
-                    ):
-                        self._records[short_schema][record["id"]] = record
-
-        self._tops.extend(event_tops)
+        event_top_data = self._record_pool.records["event_top_data"].values()
+        event_top_data = groupby(event_top_data, lambda record: record["muid"])
+        self._tops = {
+            muid: CursorList("time", list(records), self._timestamp)
+            for muid, records in event_top_data
+        }
 
         self.rebuild_tree()
 
-        log.info("Finished parsing records")
-        self.loaded = True
+        log.info("Finished loading data")
         self._fix_state()
 
     def _correct_meminfo(self) -> None:
@@ -309,10 +148,11 @@ Are you asking for the wrong time?"
         # previous time that has memory information
         new_meminfo = None
         index = 0
-        while not new_meminfo and self._tops.is_valid(index):
-            new_meminfo = self._tops[index]["memory"]
-            index -= 1
-        self._meminfo = new_meminfo
+        for muid, cursorlist in self._tops.items():
+            while not new_meminfo and cursorlist.is_valid(index):
+                new_meminfo = cursorlist[index]["memory"]
+                index -= 1
+            self._meminfo[muid] = new_meminfo
 
     def _fix_state(self) -> None:
         """
@@ -322,14 +162,15 @@ Are you asking for the wrong time?"
             - updating the machine
         """
         try:
-            self._tops.update_cursor(self._timestamp)
+            for c_list in self._tops.values():
+                c_list.update_cursor(self._timestamp)
             # if the time is None, there was no specified time, so
             # go back to the beginning of the records
             if self._timestamp is None:
                 self.recover("reload")
                 return
 
-            if not self._time_span_tracker.is_loaded(self._timestamp) and isinstance(
+            if not self._record_pool.is_loaded(self._timestamp) and isinstance(
                 self.config.input, str
             ):
                 # this is currently disabled due to errors
@@ -367,23 +208,18 @@ Are you asking for the wrong time?"
             # correct the memory information
             self._correct_meminfo()
 
-            if self._tops.is_valid(0) and self._tops.is_valid(-1):
-                # update the time elapsed
-                self._time_elapsed = float(self._tops[0]["time"]) - float(
-                    self._tops[-1]["time"]
-                )
-            else:
-                self._time_elapsed = nan
-
             # update the machine
-            # there should only be one machine, so we can just use the first one
-            if len(self._records["model_machine"]) == 0:
-                log.warn("No machine found in the records")
-                self._machine = None
+            # there will usually only be one machine, so we can just use the first one
+            if len(self._record_pool.records["model_machine"]) == 0:
+                log.warn("No machines found in the records")
+                self.selected_machine = None
             else:
-                self._machine = list(self._records["model_machine"].values())[0]
-            if len(self._records["model_machine"]) > 1:
-                log.warn("More than one machine was found in the input data.")
+                self.selected_machine = list(
+                    self._record_pool.records["model_machine"].keys()
+                )[0]
+            if len(self._record_pool.records["model_machine"]) > 1:
+                # the user will have to select a machine later
+                self.selected_machine = None
 
         except Exception as exc:  # pylint: disable=broad-except
             log.err("Exception occurred while fixing state:")
@@ -410,75 +246,72 @@ not enough information could be loaded.\
             )
         return branch  # type: ignore
 
-    def get_orgs(self) -> Optional[List[org_api.Org]]:
+    def get_orgs(self, force_reload: bool = False) -> Optional[List[dict]]:
         """Fetch a list of organization for this api_key"""
-        api_instance: org_api.OrgApi = org_api.OrgApi(self.api_client)
-
-        try:
-            orgs = api_instance.org_list(_preload_content=False)
-            orgs = json.loads(orgs.data)
-            self.log_api(API_LOG_TYPES["orgs"], {"count": len(orgs)})
-            return orgs
-        except spyderbat_api.ApiException as exc:
-            self.fail(f"Exception when calling OrgApi: {exc.status} - {exc.reason}")
-            log.traceback(exc)
-            return None
-        except MaxRetryError as exc:
-            self.fail(
-                f"There was an issue trying to connect to the API. \
-Is the url {self.config.input} correct?"
-            )
-            log.traceback(exc)
-            return None
-        except Exception as exc:  # pylint: disable=broad-except
-            self.fail("An unknown error occurred when calling OrgApi: {exc}")
-            log.traceback(exc)
-            return None
+        if len(self._record_pool.orgs) == 0 or force_reload:
+            try:
+                self._record_pool.load_orgs(force_reload)
+                self.log_api(
+                    API_LOG_TYPES["orgs"], {"count": len(self._record_pool.orgs)}
+                )
+            except APIError as exc:
+                log.traceback(exc)
+                self.fail(str(exc))
+                return None
+            except Exception as exc:  # pylint: disable=broad-except
+                self.fail("An exception occurred while loading orgs")
+                log.traceback(exc)
+        return self._record_pool.orgs
 
     def get_sources(
         self,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         uid: Optional[str] = None,
-    ) -> Optional[List[Dict]]:
+        force_reload: bool = False,
+    ) -> Optional[List[dict]]:
         """Fetch a list of sources for this api_key"""
-        # this tends to take a long time for large organizations
-        # because the returned json is all one big string
-        #
-        # we tell the api library to give us the raw response
-        # and then parse it ourselves to save some time
-        api_instance: source_api.SourceApi = source_api.SourceApi(self.api_client)
-
-        try:
-            kwargs = {}
-            if page is not None:
-                log.warn("Paging of sources is not currently supported by the API.")
-                kwargs["page"] = page
-            if page_size is not None:
-                log.warn("Paging of sources is not currently supported by the API.")
-                kwargs["page_size"] = page_size
-            if uid is not None:
-                kwargs["agent_uid_equals"] = uid
-            raw_sources: urllib3.HTTPResponse = api_instance.src_list(
-                org_uid=self.config.org,
-                _preload_content=False,
-                **kwargs,
-            )
-            sources: List = json.loads(raw_sources.data)
-            self.log_api(API_LOG_TYPES["sources"], {"count": len(sources)})
-
-            return sources
-        except MaxRetryError as exc:
-            self.fail(
-                f"There was an issue trying to connect to the API. \
-Is the url {self.config.input} correct?"
-            )
-            log.traceback(exc)
+        if self.config.org is None:
             return None
-        except Exception as exc:  # pylint: disable=broad-except
-            self.fail(f"Exception when calling SourceApi: {exc}")
-            log.traceback(exc)
+        if self._record_pool.sources.get(self.config.org) is None or force_reload:
+            try:
+                self._record_pool.load_sources(
+                    self.config.org, page, page_size, uid, force_reload
+                )
+                if self._record_pool.sources.get(self.config.org) is not None:
+                    self.log_api(
+                        API_LOG_TYPES["sources"],
+                        {"count": len(self._record_pool.sources[self.config.org])},
+                    )
+            except APIError as exc:
+                log.traceback(exc)
+                self.fail(str(exc))
+                return None
+            except Exception as exc:  # pylint: disable=broad-except
+                self.fail("An exception occurred while loading sources")
+                log.traceback(exc)
+        return self._record_pool.sources.get(self.config.org)
+
+    def get_clusters(self, force_reload: bool = False) -> Optional[List[dict]]:
+        """Fetch a list of clusters for this api_key"""
+        if self.config.org is None:
             return None
+        if self._record_pool.clusters.get(self.config.org) is None or force_reload:
+            try:
+                self._record_pool.load_clusters(self.config.org, force_reload)
+                if self._record_pool.clusters.get(self.config.org) is not None:
+                    self.log_api(
+                        API_LOG_TYPES["clusters"],
+                        {"count": len(self._record_pool.clusters[self.config.org])},
+                    )
+            except APIError as exc:
+                log.traceback(exc)
+                self.fail(str(exc))
+                return None
+            except Exception as exc:  # pylint: disable=broad-except
+                self.fail("An exception occurred while loading clusters")
+                log.traceback(exc)
+        return self._record_pool.clusters.get(self.config.org)
 
     def log_api(self, name: str, data: Dict[str, Any]) -> None:
         """Send logs to the spyderbat internal logging API"""
@@ -507,7 +340,7 @@ Is the url {self.config.input} correct?"
                 "POST",
                 f"{url}/api/v1/_/log",
                 headers=headers,
-                body=json.dumps(new_data),
+                body=orjson.dumps(new_data),
             )
             # check the response
             if response.status != 200:
@@ -524,23 +357,36 @@ Is the url {self.config.input} correct?"
         self.log_api(API_LOG_TYPES["feedback"], {"message": feedback})
         self.config["has_submitted_feedback"] = True
 
-    def get_value(self, key, previous=False) -> Any:
+    def get_value(self, key, muid: Optional[str], previous=False) -> Any:
         """Provides the specified field on the most recent or the previous
-        event_top_data record"""
+        event_top_data record. If `muid` is None, the selected machine is used,
+        and if that is None, the value is summed across all machines."""
         index = 0 if not previous else -1
-        if not self.tops_valid():
-            return None
-        return self._tops[index][key]
+        muid = muid or self.selected_machine
+        if muid is not None:
+            if not self.tops_valid():
+                return None
+            return self._tops[muid][index][key]
+        return sum_element_wise(c_list[index][key] for c_list in self._tops.values())
+
+    def get_time_elapsed(self, muid: str) -> float:
+        """Get the time elapsed since the last event_top_data record for
+        the specified machine."""
+        if not self.tops_valid(muid):
+            return 0
+        return float(self._tops[muid][0]["time"]) - float(self._tops[muid][-1]["time"])
 
     def get_top_processes(
         self,
-    ) -> Tuple[
-        Optional[Dict[str, Union[str, int]]], Optional[Dict[str, Union[str, int]]]
-    ]:
+    ) -> Dict[str, Tuple]:
         """Get the resource usage records for the processes at the current time"""
-        if not self.tops_valid():
-            return None, None
-        return (self._tops[-1]["processes"], self._tops[0]["processes"])
+        process_map = {}
+
+        for muid, c_list in self._tops.items():
+            if self.tops_valid(muid):
+                process_map[muid] = (c_list[-1]["processes"], c_list[0]["processes"])
+
+        return process_map
 
     def rebuild_tree(self) -> None:
         """Create a tree structure for the processes, based on the puid and ppuid"""
@@ -587,7 +433,7 @@ Is the url {self.config.input} correct?"
             )
             self._tree[init] = (True, self._tree[init][1])
 
-    def recover(self, method="revert") -> None:
+    def recover(self, method="revert") -> None:  # pylint: disable=too-many-branches
         """Recover the state of the model, using the given method.
         The method can be one of:
             - "revert": revert to the last loaded time
@@ -613,14 +459,21 @@ Is the url {self.config.input} correct?"
                 log.info("Reloading from beginning of records.")
                 index = 1  # make sure there is a previous index
                 new_meminfo = None
-                while not new_meminfo and index < len(self._tops.data):
-                    new_meminfo = self._tops.data[index]["memory"]
-                    index += 1
-                if index < len(self._tops.data):
-                    self.timestamp = self._tops.data[index]["time"]
-                elif len(self._tops.data) > 0:
-                    self.timestamp = self._tops.data[0]["time"]
-                self._meminfo = new_meminfo
+                muid = self.selected_machine or (
+                    list(self._tops.keys())[0] if len(self._tops) > 0 else None
+                )
+                if muid is not None:
+                    c_list = self._tops[muid]
+                    while not new_meminfo and index < len(c_list.data):
+                        new_meminfo = c_list.data[index]["memory"]
+                        index += 1
+                    if index < len(c_list.data):
+                        self.timestamp = c_list.data[index]["time"]
+                    elif len(c_list.data) > 0:
+                        self.timestamp = c_list.data[0]["time"]
+                    self._correct_meminfo()
+                else:
+                    log.warn("No machine available to reload from.")
 
             elif method == "retry":
                 log.info("Retrying loading from the API.")
@@ -636,14 +489,12 @@ Is the url {self.config.input} correct?"
             # sanity check
             if not self.is_valid():
                 self.fail("Recovering failed to find a valid time.")
-                log.debug(
-                    f"Time: {self._tops.cursor}, # of Records: {len(self._tops.data)}"
-                )
+                et_data = self._record_pool.records["event_top_data"]
+                log.debug(f"Time: {self._timestamp}, # of Records: {len(et_data)}")
                 return
 
             self.failed = False
             self.failure_reason = ""
-            self.loaded = True
         except Exception as exc:  # pylint: disable=broad-except
             log.err("Exception occurred while recovering:")
             log.traceback(exc)
@@ -655,14 +506,19 @@ Is the url {self.config.input} correct?"
         self.failed = True
         self.failure_reason = reason
 
-    def tops_valid(self) -> bool:
+    def tops_valid(self, muid: Optional[str] = None) -> bool:
         """Return whether the event top data is valid for this time"""
         # the slowest data should appear is once per 15 seconds
         grace_period = 16
+        if muid is None:
+            for muid_inner in self._tops.keys():
+                if not self.tops_valid(muid_inner):
+                    return False
+            return True
         return (
-            self._tops.is_valid(0)
-            and self._tops.is_valid(-1)
-            and abs(self._tops[0]["time"] - self._timestamp) < grace_period
+            self._tops[muid].is_valid(0)
+            and self._tops[muid].is_valid(-1)
+            and abs(self._tops[muid][0]["time"] - self._timestamp) < grace_period
         )
 
     def use_state(
@@ -682,10 +538,10 @@ Is the url {self.config.input} correct?"
         """Determine if there is enough information
         loaded to be able to use the data"""
         return (
-            self.loaded
+            self._record_pool.loaded
             and self._timestamp is not None
             and (
-                self._time_span_tracker.is_loaded(self._timestamp)
+                self._record_pool.is_loaded(self._timestamp)
                 or not isinstance(self.config.input, str)
             )
         )
@@ -693,95 +549,97 @@ Is the url {self.config.input} correct?"
     def clear(self) -> None:
         """Remove all loaded data from the model"""
         self._timestamp = None
-        self._time_elapsed = 0
         self._last_good_timestamp = None
-        self._time_span_tracker = TimeSpanTracker()
+        self._record_pool = RecordPool(self.config)
 
-        self._records = {
-            "model_process": {},
-            "model_session": {},
-            "model_connection": {},
-            "model_machine": {},
-            "model_listening_socket": {},
-            "event_redflag": {},
-            "model_container": {},
-        }
         self._tree = None
-        self._top_ids = set()
-        self._tops = CursorList("time", [], self._timestamp)
-        self._machine = None
-        self._meminfo = None
+        self._tops = {}
+        self.selected_machine = None
+        self._meminfo = {}
 
-        self.loaded = False
         self.failed = False
         self.failure_reason = ""
-        self.progress = 0
         self.columns_changed = False
 
     def is_loaded(self, timestamp: float) -> bool:
         """Return whether the model has loaded data for the given time"""
-        return self._time_span_tracker.is_loaded(timestamp) or not isinstance(
+        return self._record_pool.is_loaded(timestamp) or not isinstance(
             self.config.input, str
         )
+
+    def get_record_by_id(self, record_id: str) -> Optional[Record]:
+        """Get a record from the record pool by its ID"""
+        for group in self._record_pool.records.values():
+            if record_id in group:
+                return group[record_id]
+        return None
+
+    @property
+    def loaded(self) -> bool:
+        """Return whether the model has loaded data"""
+        return self._record_pool.loaded
+
+    @property
+    def progress(self) -> float:
+        """Return the progress of the model"""
+        return self._record_pool.progress
 
     @property
     def state(self) -> str:
         """The current status of the model"""
-        if log.log_level == log.DEBUG:
+        if log.log_level <= log.DEBUG:
             try:
-                return log.lines[-1]
+                return log.get_last_line()
             except IndexError:
                 pass
         return f"Time: {self.time}"
-
-    @property
-    def time_elapsed(self) -> float:
-        """The time elapsed between the last event_top_data record and the current one"""
-        return (
-            self._time_elapsed if self._time_elapsed != 0 and self.tops_valid() else nan
-        )
 
     @property
     def memory(self) -> Optional[Dict[str, int]]:
         """The most recent memory usage data"""
         if not self.tops_valid():
             return None
-        return self._meminfo
+        if self.selected_machine is not None:
+            return self._meminfo[self.selected_machine]
+        # create a sum of all machines
+        return sum_element_wise(  # type: ignore
+            m for m in self._meminfo.values() if m is not None
+        )
 
     @property
-    def machine(self) -> Optional[Record]:
+    def machines(self) -> Dict[str, Record]:
         """The most recent machine data"""
-        return self._machine
+        return self._record_pool.records["model_machine"]
 
     @property
     def processes(self) -> Dict[str, Record]:
         """All currently loaded process records"""
-        return self._records["model_process"]
+        return self._record_pool.records["model_process"]
 
     @property
     def flags(self) -> Dict[str, Record]:
         """All currently loaded flag records"""
-        return self._records["event_redflag"]
+        return self._record_pool.records["event_redflag"]
 
     @property
     def listening(self) -> Dict[str, Record]:
         """All currently loaded listening socket records"""
-        return self._records["model_listening_socket"]
+        return self._record_pool.records["model_listening_socket"]
 
     @property
     def connections(self) -> Dict[str, Record]:
         """All currently loaded connection records"""
-        return self._records["model_connection"]
+        return self._record_pool.records["model_connection"]
 
     @property
     def sessions(self) -> Dict[str, Record]:
         """All currently loaded session records"""
-        return self._records["model_session"]
+        return self._record_pool.records["model_session"]
 
     @property
     def containers(self) -> Dict[str, Record]:
         """All currently loaded container records"""
-        return self._records["model_container"]
+        return self._record_pool.records["model_container"]
 
     @property
     def tree(self) -> Tree:
@@ -795,7 +653,7 @@ Is the url {self.config.input} correct?"
         }
         """
         if self._tree is None:
-            raise Exception("The tree is not yet loaded.")
+            raise RuntimeError("The tree is not yet loaded.")
         return self._tree
 
     # time properties

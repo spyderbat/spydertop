@@ -19,15 +19,12 @@ from datetime import datetime, time, timedelta, timezone, tzinfo
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 import yaml
-from spyderbat_api.models import Org, Source
 from asciimatics.widgets import (
     Frame,
-    MultiColumnListBox,
     Text,
     Layout,
     Button,
     Label,
-    Widget,
     DatePicker,
     TimePicker,
     CheckBox,
@@ -37,6 +34,7 @@ from asciimatics.event import KeyboardEvent
 from asciimatics.exceptions import NextScene, StopApplication
 
 from spydertop.config import Config
+from spydertop.constants.columns import Column
 from spydertop.model import AppModel
 from spydertop.widgets import FuncLabel, Padding
 from spydertop.utils import (
@@ -45,7 +43,7 @@ from spydertop.utils import (
     log,
 )
 from spydertop.constants import API_LOG_TYPES, COLOR_REGEX
-from spydertop.utils.types import ExtendedParser
+from spydertop.widgets.table import Table
 
 
 class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
@@ -81,6 +79,7 @@ class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
                 "sources": None,  # Optional[List]
                 "source_glob": None,  # Optional[str]
                 "looking_for_sources": False,  # bool
+                "force_reload": False,  # bool
                 "needs_saving": False,  # bool
                 "created_account": False,  # bool
                 "notification": None,  # Optional[str]
@@ -223,7 +222,7 @@ repository) like so:
             if self.cache["orgs"] is None:
 
                 def load_orgs():
-                    orgs = self.model.get_orgs()
+                    orgs = self.model.get_orgs(force_reload=self.cache["force_reload"])
                     if orgs is not None:
                         self.set_cache(
                             orgs=[
@@ -235,6 +234,7 @@ repository) like so:
                         )
                     self.trigger_build()
                     self._screen.force_update()
+                    self.set_cache(force_reload=False)
 
                 self.thread = Thread(target=load_orgs)
                 self.thread.start()
@@ -268,6 +268,12 @@ logging into your account on the website.\
                         except ValueError:
                             index = 0
 
+                    def reload_orgs():
+                        self.set_cache(force_reload=True)
+                        self.set_cache(orgs=None)
+                        self._on_submit = None
+                        self.trigger_build()
+
                     self.build_question(
                         "Please select an organization",
                         [
@@ -286,6 +292,7 @@ logging into your account on the website.\
                             for org in orgs
                         ],
                         index,
+                        refresh_button=reload_orgs,
                     )
                     return
 
@@ -309,9 +316,15 @@ logging into your account on the website.\
             if self.cache["sources"] is None:
 
                 def load_sources():
-                    sources = self.model.get_sources()
-                    if sources is None:
-                        # the failure reason will be set by the model
+                    sources = self.model.get_sources(
+                        force_reload=self.cache["force_reload"]
+                    )
+                    clusters = self.model.get_clusters(
+                        force_reload=self.cache["force_reload"]
+                    )
+                    self.set_cache(force_reload=False)
+                    if sources is None and clusters is None:
+                        self.model.fail("Failed to load any machines or clusters")
                         self.trigger_build()
                         self._screen.force_update()
                         return
@@ -323,10 +336,11 @@ logging into your account on the website.\
                     self.set_cache(
                         sources=[
                             source
-                            for source in sources
+                            for source in (sources or [])
                             # the global source is not useful in this context
                             if not source["uid"].startswith("global:")
-                        ]
+                        ],
+                        clusters=clusters or [],
                     )
                     self.trigger_build()
                     self._screen.force_update()
@@ -341,7 +355,7 @@ logging into your account on the website.\
                 return
 
             # if there are no sources, guide the user through creating one
-            if self.cache["sources"] == []:
+            if self.cache["sources"] == [] and self.cache["clusters"] == []:
                 self.set_cache(needs_saving=True, sources=None)
                 self.build_instructions(
                     f"""\
@@ -405,6 +419,13 @@ Once you have a source configured, you can continue.\
                     self._on_submit = None
                     self.trigger_build()
 
+                def refresh_handler():
+                    self.set_cache(force_reload=True)
+                    self.config.source_confirmed = False
+                    self.set_cache(sources=None)
+                    self._on_submit = None
+                    self.trigger_build()
+
                 # there is no org selection to go back to if
                 # the user is in only one org
                 if self.cache["orgs"] and len(self.cache["orgs"]) == 1:
@@ -413,8 +434,42 @@ Once you have a source configured, you can continue.\
                     back = back_handler
 
                 self.build_question(
-                    "Please select a machine",
+                    "Please select a machine or cluster",
                     [
+                        (
+                            [
+                                "${4}Cluster:",
+                                cluster.get("name", "<No Name>"),
+                                " ",
+                                pretty_datetime(
+                                    datetime.strptime(
+                                        cluster["last_data"],
+                                        "%Y-%m-%dT%H:%M:%SZ",
+                                    )
+                                    .replace(tzinfo=timezone.utc)
+                                    .astimezone(tz=get_timezone(self.model))
+                                )
+                                if "last_data" in cluster
+                                else "",
+                                str(
+                                    datetime.strptime(
+                                        cluster["last_data"],
+                                        "%Y-%m-%dT%H:%M:%SZ",
+                                    )
+                                    .replace(tzinfo=timezone.utc)
+                                    .astimezone(tz=get_timezone(self.model))
+                                ),
+                                cluster.get("uid", ""),
+                            ],
+                            lambda c=cluster: self.set_source(c),
+                        )
+                        for cluster in sorted(
+                            self.cache["clusters"],
+                            key=lambda c: c.get("last_data", 0),
+                            reverse=True,
+                        )
+                    ]
+                    + [
                         (
                             self.format_source(source),
                             lambda s=source: self.set_source(s),
@@ -424,6 +479,7 @@ Once you have a source configured, you can continue.\
                     index,
                     self.cache["source_glob"],
                     back,
+                    refresh_handler,
                 )
                 return
 
@@ -453,67 +509,70 @@ Once you have a source configured, you can continue.\
     def build_question(  # pylint: disable=too-many-arguments
         self,
         question: str,
-        answers: List[Tuple[List, Callable]],
+        answers: List[Tuple[List[str], Callable]],
         index=0,
         search_string: Optional[str] = None,
         back_button: Optional[Callable] = None,
+        refresh_button: Optional[Callable] = None,
     ) -> None:
         """Construct a layout that asks a question and has a set of answers, making use of the
         multi-column list box widget."""
-
         # create column widths
         columns = [0] * len(answers[0][0])
-        for answer in answers:
+        # we ignore any more than the first 100 answers to avoid
+        # taking too long to calculate the column widths
+        for answer in answers[:100]:
             for i in range(len(answer[0])):
-                columns[i] = max(columns[i], len(answer[0][i]) + 1)
-        columns = [min(c, 40) for c in columns]
+                columns[i] = max(
+                    columns[i], len(re.sub(COLOR_REGEX, "", answer[0][i])) + 1
+                )
+        columns = [Column("", min(c, 40), str) for c in columns]
+        columns[-1].max_width = 0
 
-        list_box = MultiColumnListBox(
-            Widget.FILL_FRAME,
-            columns,
-            [(x[0], i) for i, x in enumerate(answers)],
-            parser=ExtendedParser(),
-            name="selection",
-        )
+        # list_box = MultiColumnListBox(
+        #     Widget.FILL_FRAME,
+        #     columns,
+        #     [(x[0], i) for i, x in enumerate(answers)],
+        #     parser=ExtendedParser(),
+        #     name="selection",
+        # )
+        list_box = Table(self.model, None, "selection")
+        list_box.header_enabled = False
         list_box.value = index
-        list_box.start_line = 0
+        list_box.columns = columns
+        options = [x[0] for x in answers]
+        list_box.set_rows(options, options)
+        # list_box.start_line = 0
         text_input = None
 
         def on_search():
             if text_input is None:
                 return
-            new_options = [
-                (line[0], i)
-                for i, line in enumerate(answers)
-                if (
-                    text_input.value.lower() in " ".join(line[0]).lower()
-                    or fnmatch.fnmatch(
-                        text_input.value.lower(), "".join(line[0]).lower()
-                    )
-                )
-            ]
-            list_box.options = new_options
+            self.model.config["filter"] = text_input.value
+            list_box.do_filter()
 
         text_input = Text(on_change=on_search, name="search")
         if search_string is not None:
             text_input.value = search_string
 
-        self._on_submit = (
-            lambda: answers[list_box.value][1]()
-            if list_box.value is not None
-            else (
-                self.set_cache(
-                    notification="No option was selected, please select one"
-                ),
-                self.trigger_build(),
-            )
-        )
+        def on_submit():
+            if list_box.value is not None:
+                self.model.config["filter"] = None
+                answers[list_box.value][1]()
+            else:
+                self.set_cache(notification="No option was selected, please select one")
+                self.trigger_build()
+
+        self._on_submit = on_submit
 
         self.layout.add_widget(Label(question, align="^"), 1)
         self.layout.add_widget(Label("Search:", align="<"), 1)
         self.layout.add_widget(text_input, 1)
         self.layout.add_widget(Padding(), 1)
         self.layout.add_widget(list_box, 1)
+        if refresh_button is not None:
+            self.layout.add_widget(Button("Refresh", refresh_button), 1)
+            self.layout.add_widget(Padding(), 1)
         self.footer.add_widget(
             Button(
                 "Continue",
@@ -528,7 +587,7 @@ Once you have a source configured, you can continue.\
 
     def build_instructions(self, instructions: str, callback: Callable) -> None:
         """Construct a layout that displays instructions and waits for user to continue"""
-        self.layout.add_widget(FuncLabel(lambda: instructions, align="<"), 1)
+        self.layout.add_widget(FuncLabel(lambda: instructions), 1)
         self.layout.add_widget(Padding(), 1)
         self.footer.add_widget(
             Button("Continue", lambda: (callback(), self.trigger_build())), 1
@@ -546,7 +605,6 @@ You can find this by clicking on the account icon in the top right of the Spyder
 and clicking on 'API Keys'. If you don't have an API key, you can then create one by \
 clicking on 'Create API Key'.\
 """,
-                align="<",
             ),
             1,
         )
@@ -586,7 +644,6 @@ clicking on 'Create API Key'.\
 Please select a start time. This can also be passed as a command line argument; \
 see the help page for more information.\
 """,
-                align="<",
             ),
             1,
         )
@@ -735,7 +792,6 @@ again the next time you start Spydertop, and will skip this configuration menu.
 These are default values, and can be overridden by passing them as command line \
 arguments (except for the API Key).\
 """,
-                align="<",
             ),
             1,
         )
@@ -752,7 +808,6 @@ arguments (except for the API Key).\
             to_save[k] = not to_save[k]
 
         for key, val in to_save.items():
-
             value = getattr(self.config, key.lower())
             if key == "API_Key":
                 # Show only the first and last few characters of the API key
@@ -819,7 +874,7 @@ arguments (except for the API Key).\
         self.set_cache(needs_saving=False)
         self.trigger_build()
 
-    def format_source(self, source: Source) -> List[str]:
+    def format_source(self, source) -> List[str]:
         """Format a source for display"""
         try:
             last_stored_time = (
@@ -833,6 +888,7 @@ arguments (except for the API Key).\
         except OverflowError:
             last_stored_time = datetime.fromtimestamp(0).replace(tzinfo=timezone.utc)
         return [
+            "${3}Machine:",
             source.get("description", ""),
             " ",
             pretty_datetime(last_stored_time)
@@ -847,7 +903,7 @@ arguments (except for the API Key).\
         self.set_cache(**{key: value})
         self.trigger_build()
 
-    def set_org(self, org: Org) -> None:
+    def set_org(self, org) -> None:
         """Set the organization"""
         if org["uid"] != self.config.org:
             self.set_cache(sources=None)
@@ -855,7 +911,7 @@ arguments (except for the API Key).\
         self.config.org_confirmed = True
         self.trigger_build()
 
-    def set_source(self, source: Source) -> None:
+    def set_source(self, source) -> None:
         """Set the source"""
         self.config.machine = source["uid"]
         self.set_cache(source=source)
