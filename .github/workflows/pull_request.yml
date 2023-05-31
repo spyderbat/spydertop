@@ -38,7 +38,7 @@ jobs:
         name: Run Lint (3.7)
         if: matrix.python-version == '3.7'
         run: |
-          pylint spydertop --disable=no-self-use
+          pylint spydertop
       - 
         name: Run Type Check
         uses: jakebailey/pyright-action@v1

@@ -127,7 +127,8 @@ class RecordPool:
 
             async def load():
                 nonlocal lines
-                threads: List[Future[List[bytes]]] = []
+                # future is unsubscriptable in python 3.7
+                threads: List[Future] = []  # : List[Future[List[bytes]]]
                 with ThreadPoolExecutor() as executor:
                     for source in sources:
                         for data_type in ["htop", "spydergraph"]:

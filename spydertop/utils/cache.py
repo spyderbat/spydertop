@@ -21,8 +21,9 @@ def cache_block(
     """A context manager for caching the result of a block of code"""
     if isinstance(key, str):
         key = key.encode("utf-8")
-    # the api key may be included, so I use usedforsecurity=True for some extra protection
-    numeric_hash = hashlib.md5(key, usedforsecurity=True).hexdigest()
+    # the api key may be included, so don't set usedforsecurity=False for some extra protection
+    # usedforsecurity is also not available in python <3.9
+    numeric_hash = hashlib.md5(key).hexdigest()
     hashed_key = f"block:{numeric_hash}"
 
     result = _cache_get(hashed_key, timeout)
