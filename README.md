@@ -26,20 +26,23 @@ docker run -it -v /etc/localtime:/etc/localtime spyderbat/spydertop [ARGS]
 
 ## Installation
 
-Download the appropriate wheel file from the [releases page](https://github.com/spyderbat/spydertop/releases) and install with:
+Spydertop can be installed from [PyPi](https://pypi.org/project/spydertop/) with pip:
 
 ```sh
-pip install [WHEEL FILE]
+pip install spydertop
 ```
 
-If you prefer to install from source, clone this repository and run this command inside:
+If you prefer a manual install, you can download and install the appropriate wheel file or bundled executable (`spydertop-bundled-XXX`) from the [releases page](https://github.com/spyderbat/spydertop/releases).
+
+To install from source, clone this repository and run this command inside:
 
 ```sh
 # note: requires setuptools >= 45
 pip install .
+# pip install . -e # for editable install
 ```
 
-On your first run of `spydertop`, it will guide you through setting up a configuration if you do not have one already. If you prefer to set it up yourself, your organization id can be found in the url for the dashboard, and many other pages:
+On your first run of `spydertop`, it will guide you through setting up a configuration if you do not have one already. If you prefer to set it up yourself, see [Configuration](#configuration). Your organization id can be found in the url for the dashboard, and many other pages:
 
 ```url
 https://api.spyderbat.com/app/org/{ORG_ID_HERE}/dashboard
@@ -95,8 +98,8 @@ For development, Spydertop can be installed with the `--editable` flag in `pip`.
 # in the spydertop repository:
 
 # setup development environment
-python -m venv .env
-source .env/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 
 # install spydertop for development
 pip install --editable .
