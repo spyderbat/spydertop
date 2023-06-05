@@ -166,10 +166,8 @@ Section default does not contain {exc.args[0]}, and it was not specified as a co
     @staticmethod
     def _load_config() -> Dict[str, Any]:
         """Loads the configuration file at $HOME/.spyderbat-api/config.yaml"""
-        home = os.environ.get("HOME")
-        config_file_loc = os.path.join(
-            home, ".spyderbat-api/config.yaml"  # type: ignore
-        )
+        config_dir = get_config_dir()
+        config_file_loc = config_dir / "config.yaml"
 
         with open(config_file_loc, encoding="utf-8") as file:
             file_config = yaml.safe_load(file)
@@ -282,10 +280,13 @@ config:
 
 def get_config_dir() -> Path:
     """Returns the path to the config directory, ensuring that it exists"""
-    config_dir = os.path.join(os.environ.get("HOME"), ".spyderbat-api/")  # type: ignore
+    home = os.environ.get("HOME")
+    if home is None:
+        raise click.ClickException("Failed to find home directory")
+    config_dir = Path(home) / Path(".spyderbat-api")
 
     # ensure that the config directory exists
-    if not os.path.exists(config_dir):
-        os.mkdir(config_dir)
+    if not config_dir.exists():
+        config_dir.mkdir()
 
     return Path(config_dir)
