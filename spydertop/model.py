@@ -92,13 +92,13 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
                 self.fail("An exception occurred while loading data")
                 log.traceback(exc)
 
-        thread = threading.Thread(target=guard)
-        thread.start()
-        self.thread = thread
-
         # if the output file is gzipped, open it with gzip
         if self.config.output and self.config.output.name.endswith(".gz"):
             self.config.output = gzip.open(self.config.output.name, "wt")
+
+        thread = threading.Thread(target=guard)
+        thread.start()
+        self.thread = thread
 
     def init_api(self):
         """Initialize the API client"""

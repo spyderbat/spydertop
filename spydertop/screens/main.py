@@ -254,6 +254,9 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             tabs_layout.add_widget(button, i)
 
         if self._model.config["tab"] not in [t.lower() for t in available_tabs]:
+            if len(available_tabs) == 0:
+                self._model.fail("No records of were found.")
+                raise NextScene("Failure")
             self._model.config["tab"] = available_tabs[0].lower()
 
         ################# Main Table #######################

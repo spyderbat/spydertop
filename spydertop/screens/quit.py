@@ -32,7 +32,6 @@ class QuitFrame(Frame):
     _set_state: Callable
 
     def __init__(self, screen: Screen, model: AppModel) -> None:
-        # pylint: disable=line-too-long
         super().__init__(screen, screen.height, screen.width, reduce_cpu=True)
         self._model = model
         self.add_layout(self._single_column)

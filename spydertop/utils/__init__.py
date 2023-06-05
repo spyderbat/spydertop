@@ -138,6 +138,8 @@ def is_event_in_widget(event, widget):
 
 def calculate_widths(screen_width, desired_columns: List[int]) -> List[int]:
     """Manually calculate the widths for a Layout, as the default has rounding errors."""
+    if len(desired_columns) == 0:
+        return []
     total_desired = sum(desired_columns)
     actual_widths = [int(x / total_desired * screen_width) for x in desired_columns]
     actual_widths[-1] += screen_width - sum(actual_widths)

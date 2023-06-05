@@ -179,6 +179,7 @@ class DelayedLog:
     log_level: int
     logger: Optional[logging.Logger] = None
 
+    DEVELOPMENT = logging.NOTSET + 1
     TRACEBACK = logging.DEBUG - 1
     DEBUG = logging.DEBUG
     INFO = logging.INFO
@@ -195,6 +196,7 @@ class DelayedLog:
     def __init__(self):
         # require log_level to be set before logging
         logging.addLevelName(self.TRACEBACK, "TRACEBACK")
+        logging.addLevelName(self.DEVELOPMENT, "DEVELOPMENT")
 
     def initialize_development_logging(self):
         """Initialize logging for development purposes, saving to a file."""
@@ -218,7 +220,7 @@ class DelayedLog:
                     click.echo(time.strftime("%H:%M:%S") + " " + line)
         self._logs = []
 
-    def log(self, *messages: Any, log_level: int = logging.NOTSET):
+    def log(self, *messages: Any, log_level: int = logging.NOTSET + 1):
         """Log a message to the console, by default at DEBUG level."""
         line = " ".join([str(_) for _ in messages])
         time = datetime.now()

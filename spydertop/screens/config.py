@@ -16,7 +16,7 @@ import re
 from time import sleep
 from threading import Thread
 from datetime import datetime, time, timedelta, timezone, tzinfo
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, List, Optional, Union
 
 import yaml
 from asciimatics.widgets import (
@@ -277,20 +277,18 @@ logging into your account on the website.\
                     self.build_question(
                         "Please select an organization",
                         [
-                            (
-                                [
-                                    org["name"],
-                                    f"Sources: {org['total_sources']}"
-                                    if "total_sources" in org
-                                    else "",
-                                    str(org.get("owner_email", "")),
-                                    ", ".join(org["tags"]) if "tags" in org else "",
-                                    org["uid"],
-                                ],
-                                lambda o=org: self.set_org(o),
-                            )
+                            [
+                                org["name"],
+                                f"Sources: {org['total_sources']}"
+                                if "total_sources" in org
+                                else "",
+                                str(org.get("owner_email", "")),
+                                ", ".join(org["tags"]) if "tags" in org else "",
+                                org["uid"],
+                            ]
                             for org in orgs
                         ],
+                        lambda row: self.set_org(row[4]) if row is not None else None,
                         index,
                         refresh_button=reload_orgs,
                     )
@@ -393,7 +391,7 @@ Once you have a source configured, you can continue.\
                         )
                         return
                     if len(sources) == 1:
-                        self.set_source(sources[0])
+                        self.set_source(sources[0]["uid"])
                         self._needs_build = True
                         self._screen.force_update()
                         return
@@ -436,46 +434,38 @@ Once you have a source configured, you can continue.\
                 self.build_question(
                     "Please select a machine or cluster",
                     [
-                        (
-                            [
-                                "${4}Cluster:",
-                                cluster.get("name", "<No Name>"),
-                                " ",
-                                pretty_datetime(
-                                    datetime.strptime(
-                                        cluster["last_data"],
-                                        "%Y-%m-%dT%H:%M:%SZ",
-                                    )
-                                    .replace(tzinfo=timezone.utc)
-                                    .astimezone(tz=get_timezone(self.model))
+                        [
+                            "${4}Cluster:",
+                            cluster.get("name", "<No Name>"),
+                            " ",
+                            pretty_datetime(
+                                datetime.strptime(
+                                    cluster["last_data"],
+                                    "%Y-%m-%dT%H:%M:%SZ",
                                 )
-                                if "last_data" in cluster
-                                else "",
-                                str(
-                                    datetime.strptime(
-                                        cluster["last_data"],
-                                        "%Y-%m-%dT%H:%M:%SZ",
-                                    )
-                                    .replace(tzinfo=timezone.utc)
-                                    .astimezone(tz=get_timezone(self.model))
-                                ),
-                                cluster.get("uid", ""),
-                            ],
-                            lambda c=cluster: self.set_source(c),
-                        )
+                                .replace(tzinfo=timezone.utc)
+                                .astimezone(tz=get_timezone(self.model))
+                            )
+                            if "last_data" in cluster
+                            else "",
+                            str(
+                                datetime.strptime(
+                                    cluster["last_data"],
+                                    "%Y-%m-%dT%H:%M:%SZ",
+                                )
+                                .replace(tzinfo=timezone.utc)
+                                .astimezone(tz=get_timezone(self.model))
+                            ),
+                            cluster.get("uid", ""),
+                        ]
                         for cluster in sorted(
                             self.cache["clusters"],
                             key=lambda c: c.get("last_data", 0),
                             reverse=True,
                         )
                     ]
-                    + [
-                        (
-                            self.format_source(source),
-                            lambda s=source: self.set_source(s),
-                        )
-                        for source in sources
-                    ],
+                    + [self.format_source(source) for source in sources],
+                    lambda row: self.set_source(row[5]) if row is not None else None,
                     index,
                     self.cache["source_glob"],
                     back,
@@ -506,10 +496,11 @@ Once you have a source configured, you can continue.\
         log.debug(self.config)
         self.build_error("An unexpected error occurred")
 
-    def build_question(  # pylint: disable=too-many-arguments
+    def build_question(  # pylint: disable=too-many-arguments,too-many-locals
         self,
         question: str,
-        answers: List[Tuple[List[str], Callable]],
+        answers: List[List[str]],
+        callback: Callable[[Optional[List[str]]], None],
         index=0,
         search_string: Optional[str] = None,
         back_button: Optional[Callable] = None,
@@ -518,31 +509,21 @@ Once you have a source configured, you can continue.\
         """Construct a layout that asks a question and has a set of answers, making use of the
         multi-column list box widget."""
         # create column widths
-        columns = [0] * len(answers[0][0])
+        columns = [0] * len(answers[0])
         # we ignore any more than the first 100 answers to avoid
         # taking too long to calculate the column widths
         for answer in answers[:100]:
-            for i in range(len(answer[0])):
-                columns[i] = max(
-                    columns[i], len(re.sub(COLOR_REGEX, "", answer[0][i])) + 1
-                )
+            for i, cell in enumerate(answer):
+                columns[i] = max(columns[i], len(re.sub(COLOR_REGEX, "", cell)) + 1)
         columns = [Column("", min(c, 40), str) for c in columns]
+        # make the last column take up the rest of the space
         columns[-1].max_width = 0
 
-        # list_box = MultiColumnListBox(
-        #     Widget.FILL_FRAME,
-        #     columns,
-        #     [(x[0], i) for i, x in enumerate(answers)],
-        #     parser=ExtendedParser(),
-        #     name="selection",
-        # )
         list_box = Table(self.model, None, "selection")
         list_box.header_enabled = False
         list_box.value = index
         list_box.columns = columns
-        options = [x[0] for x in answers]
-        list_box.set_rows(options, options)
-        # list_box.start_line = 0
+        list_box.set_rows(answers, answers)
         text_input = None
 
         def on_search():
@@ -558,7 +539,8 @@ Once you have a source configured, you can continue.\
         def on_submit():
             if list_box.value is not None:
                 self.model.config["filter"] = None
-                answers[list_box.value][1]()
+                row = list_box.get_selected()
+                callback([str(v) for v in row[1]] if row is not None else None)
             else:
                 self.set_cache(notification="No option was selected, please select one")
                 self.trigger_build()
@@ -903,18 +885,21 @@ arguments (except for the API Key).\
         self.set_cache(**{key: value})
         self.trigger_build()
 
-    def set_org(self, org) -> None:
+    def set_org(self, org_uid: str) -> None:
         """Set the organization"""
-        if org["uid"] != self.config.org:
+        if org_uid != self.config.org:
             self.set_cache(sources=None)
-            self.config.org = org["uid"]
+            self.config.org = org_uid
         self.config.org_confirmed = True
         self.trigger_build()
 
-    def set_source(self, source) -> None:
+    def set_source(self, source_uid: str) -> None:
         """Set the source"""
-        self.config.machine = source["uid"]
-        self.set_cache(source=source)
+        self.config.machine = source_uid
+        sources: list = self.cache["sources"]
+        source = next((s for s in sources if s["uid"] == source_uid), None)
+        if source is not None:
+            self.set_cache(source=source)
         self.config.source_confirmed = True
         self.trigger_build()
 
