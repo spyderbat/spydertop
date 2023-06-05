@@ -161,6 +161,9 @@ No more records can be loaded."
             ]
             self._config.output.writelines(lines)
 
+        self.loaded = True
+        log.debug("Completed loading records")
+
     def _process_records(
         self,
         lines: Union[List[str], List[bytes]],
@@ -178,6 +181,7 @@ No more records can be loaded."
 
         if len(lines) == 0:
             log.info("No records to process")
+            self.progress += progress_increase
             return
 
         # translate the lines from json to a dict in parallel
@@ -205,8 +209,6 @@ No more records can be loaded."
                     # we already have a record with a newer timestamp
                     continue
             group[rec_id] = record
-
-        self.loaded = True
 
     def is_loaded(self, timestamp: float) -> bool:
         """Check if the data is loaded for a given timestamp"""
