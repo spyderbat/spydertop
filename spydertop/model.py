@@ -20,7 +20,7 @@ import uuid
 import orjson
 import urllib3
 
-from spydertop.config import Config
+from spydertop.config import DEFAULT_API_URL, Config
 from spydertop.recordpool import RecordPool
 from spydertop.utils import get_timezone, log, sum_element_wise
 from spydertop.utils.types import APIError, Record, Tree
@@ -316,7 +316,7 @@ not enough information could be loaded.\
     def log_api(self, name: str, data: Dict[str, Any]) -> None:
         """Send logs to the spyderbat internal logging API"""
         if not isinstance(self.config.input, str):
-            url = "https://api.spyderbat.com"
+            url = DEFAULT_API_URL
         else:
             url = self.config.input
         new_data = {

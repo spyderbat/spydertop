@@ -24,7 +24,7 @@ from urllib3.exceptions import MaxRetryError
 
 from spydertop.config import Config
 from spydertop.utils import log
-from spydertop.utils.cache import DEFAULT_TIMEOUT, cache_block
+from spydertop.config.cache import DEFAULT_TIMEOUT, cache_block
 from spydertop.utils.types import APIError, Record, TimeSpanTracker
 
 

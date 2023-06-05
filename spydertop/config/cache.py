@@ -4,10 +4,11 @@ A module for handling caching of data from expensive operations
 
 from datetime import timedelta, datetime
 import hashlib
+from pathlib import Path
 from typing import Callable, Optional, Union
 import gzip
 
-from spydertop.config import get_config_dir
+from spydertop.config import DIRS
 from spydertop.utils import log
 
 DEFAULT_TIMEOUT = timedelta(minutes=5)
@@ -45,9 +46,9 @@ def _cache_set(key: str, value):
 
 def _disk_cache_get(key: str, timeout: timedelta) -> Optional[bytes]:
     """Get the cached value for a key from the cache directory"""
-    cache_dir = _get_cache_dir()
-
+    cache_dir = Path(DIRS.user_cache_dir)
     cache_file = cache_dir / key
+
     if not cache_file.exists():
         log.debug("cache miss;reason=nonexistent", key)
         return None
@@ -62,17 +63,8 @@ def _disk_cache_get(key: str, timeout: timedelta) -> Optional[bytes]:
 
 def _disk_cache_set(key: str, value: bytes):
     """Set the cached value for a key in the cache directory"""
-    cache_dir = _get_cache_dir()
+    cache_dir = Path(DIRS.user_cache_dir)
     cache_file = cache_dir / key
 
     with gzip.open(cache_file, "wb") as open_file:
         open_file.write(value)
-
-
-def _get_cache_dir():
-    """Get the cache directory"""
-    config_dir = get_config_dir()
-    cache_dir = config_dir / "cache"
-    if not cache_dir.exists():
-        cache_dir.mkdir()
-    return cache_dir

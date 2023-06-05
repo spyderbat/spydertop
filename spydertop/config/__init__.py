@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO, Union
 from datetime import datetime, timedelta
+from platformdirs import PlatformDirs
 
 import yaml
 import click
@@ -28,6 +29,14 @@ from spydertop.constants.columns import (
     Column,
 )
 from spydertop.utils import log
+
+DIRS = PlatformDirs(  # pylint: disable=unexpected-keyword-arg
+    "spydertop",
+    "Spyderbat",
+    roaming=True,
+    ensure_exists=True,
+)
+DEFAULT_API_URL = "https://api.spyderbat.com"
 
 
 def dump_columns(columns: List[Column]) -> Dict[str, bool]:
@@ -142,7 +151,7 @@ See --help for a list of valid log levels."
                     if "api_url" in config_default
                     else None
                 )
-                or "https://api.spyderbat.com"
+                or DEFAULT_API_URL
             )
             # remove the trailing slash if it exists
             if isinstance(self.input, str) and self.input[-1] == "/":
@@ -166,7 +175,7 @@ Section default does not contain {exc.args[0]}, and it was not specified as a co
     @staticmethod
     def _load_config() -> Dict[str, Any]:
         """Loads the configuration file at $HOME/.spyderbat-api/config.yaml"""
-        config_dir = get_config_dir()
+        config_dir = Path(DIRS.user_config_dir)
         config_file_loc = config_dir / "config.yaml"
 
         with open(config_file_loc, encoding="utf-8") as file:
@@ -205,11 +214,11 @@ Section default does not contain {exc.args[0]}, and it was not specified as a co
 
     def dump(self) -> None:
         """Saves the settings in a persistent configuration file"""
-        config_dir = get_config_dir()
+        cache_dir = Path(DIRS.user_cache_dir)
 
         # save the config file
         with open(
-            config_dir / ".spydertop-settings.yaml", "w", encoding="utf-8"
+            cache_dir / ".spydertop-settings.yaml", "w", encoding="utf-8"
         ) as file:
             exclude_settings = ["filter", "sort_column", "sort_ascending", "play"]
             for key in exclude_settings:
@@ -276,17 +285,3 @@ config:
             and "*" not in self.machine  # * is a wildcard for the source
             and self.start_time is not None
         ) or not isinstance(self.input, str)
-
-
-def get_config_dir() -> Path:
-    """Returns the path to the config directory, ensuring that it exists"""
-    home = os.environ.get("HOME")
-    if home is None:
-        raise click.ClickException("Failed to find home directory")
-    config_dir = Path(home) / Path(".spyderbat-api")
-
-    # ensure that the config directory exists
-    if not config_dir.exists():
-        config_dir.mkdir()
-
-    return Path(config_dir)

@@ -15,8 +15,8 @@ import os
 from asciimatics.screen import ManagedScreen
 from asciimatics.scene import Scene
 from asciimatics.exceptions import ResizeScreenError
-from spydertop.config import Config
 
+from spydertop.config import Config
 from spydertop.model import AppModel
 from spydertop.screens.loading import LoadingFrame
 from spydertop.screens.main import MainFrame
