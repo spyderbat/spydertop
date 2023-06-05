@@ -36,6 +36,7 @@ dependencies = [
     "click",
     "pyyaml",
     "pyperclip",
+    "dateparser",
     "urllib3",
     "orjson",
     "importlib-metadata >= 1.0; python_version < \"3.8\"",

@@ -9,12 +9,11 @@
 Contains the logic to process cli arguments and start the application
 """
 
-import time
 import gzip
-from datetime import datetime
 from typing import Optional
 from os.path import exists
 
+import dateparser
 import click
 from spydertop.config import Config
 from spydertop.screens import start_screen
@@ -42,23 +41,14 @@ class Timestamp(click.ParamType):
     ):
         if not value:
             return None
-        # try converting to datetime with iso first
-        try:
-            timestamp = datetime.fromisoformat(value)
-            return timestamp.timestamp()
-        except ValueError:
-            try:
-                timestamp = convert_to_seconds(value)
-
-                if timestamp < 0:
-                    timestamp = time.time() + timestamp
-                return timestamp
-            except ValueError:
-                return self.fail(
-                    f"{value} is not a valid timestamp. "
-                    "Please use a valid timestamp or a relative time "
-                    "using the following units: s, m, h, d, y",
-                )
+        parsed_date = dateparser.parse(value)
+        if parsed_date:
+            return parsed_date.timestamp()
+        return self.fail(
+            f"{value} is not a valid timestamp. "
+            "Please use a valid timestamp or a relative time "
+            "using the following units: s, m, h, d, y",
+        )
 
     def get_missing_message(self, param):
         return "TIMESTAMP is required to fetch the correct records"
@@ -68,10 +58,10 @@ class Duration(click.ParamType):
     """
     A duration in time, using simple units.
     Accepted units are s: seconds, m: minutes, h: hours, d: days, y: years.
-    No unit is interpreted as seconds. For example:
+    An absent unit is interpreted as seconds. For example:
 
-    -5.5d = 5.5 days ago
-    -5m = 5 minutes ago
+    5.5d = 5.5 days
+    5m = 5 minutes
     """
 
     name = "Duration"
