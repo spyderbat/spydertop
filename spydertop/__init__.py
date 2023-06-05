@@ -24,4 +24,4 @@ if __name__ == "__main__":
 
     # otherwise, we are running as a python module, likely for debugging
     # default to debug logging
-    cli(["--log-level", "NOTSET+"] + sys.argv[1:])
+    cli(["--log-level", "DEVELOPMENT+"] + sys.argv[1:])
