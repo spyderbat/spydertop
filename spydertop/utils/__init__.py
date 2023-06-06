@@ -228,3 +228,8 @@ def get_machine_short_name(machine: Record) -> str:
             return "node:" + machine["hostname"]
         return machine["cloud_tags"]["Name"]
     return machine["hostname"]
+
+
+def obscure_key(key: str) -> str:
+    """Obscure a key by only showing the first and last 4 characters"""
+    return key[:4] + "..." + key[-4:]

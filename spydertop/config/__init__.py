@@ -9,6 +9,7 @@
 Configuration object and associated functions
 """
 
+from gzip import GzipFile
 import logging
 import os
 from pathlib import Path
@@ -56,7 +57,7 @@ class Config:  # pylint: disable=too-many-instance-attributes
     api_key: Optional[str]
     org: Optional[str]
     machine: Optional[str]
-    input: Union[str, TextIO]
+    input: Union[str, TextIO, GzipFile]
     output: Optional[TextIO]
     start_time: Optional[datetime]
     start_duration: timedelta
@@ -89,7 +90,7 @@ class Config:  # pylint: disable=too-many-instance-attributes
         self,
         org: Optional[str],
         source: Optional[str],
-        f_input: Optional[Union[str, TextIO]],
+        f_input: Optional[Union[str, TextIO, GzipFile]],
         output: Optional[TextIO],
         start_time: Optional[float],
         duration: int,
