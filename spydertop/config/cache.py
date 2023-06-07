@@ -1,3 +1,10 @@
+#
+# cache.py
+#
+# Author: Griffith Thomas
+# Copyright 2023 Spyderbat, Inc. All rights reserved.
+#
+
 """
 A module for handling caching of data from expensive operations
 """
@@ -12,6 +19,7 @@ from spydertop.config import DIRS
 from spydertop.utils import log
 
 DEFAULT_TIMEOUT = timedelta(minutes=5)
+# TODO: add a cache for some settings, such as has_submitted_feedback
 
 
 def cache_block(

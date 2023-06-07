@@ -1,5 +1,17 @@
+#
+# secret.py
+#
+# Author: Griffith Thomas
+# Copyright 2023 Spyderbat, Inc. All rights reserved.
+#
+
+"""
+A collection of functionality for handling secrets
+"""
+
+from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 import yaml
 from spydertop.config import DIRS, DEFAULT_API_URL
@@ -7,27 +19,21 @@ from spydertop.config import DIRS, DEFAULT_API_URL
 from spydertop.utils import obscure_key
 
 
+@dataclass
 class Secret:
+    """
+    A collection of data necessary to fetch data from the API
+    """
+
     api_key: str
-    api_url: str
-    name: str
+    api_url: str = DEFAULT_API_URL
 
-    def __init__(self, name: str, api_key: str, api_url: Optional[str]):
-        self.name = name
-        self.api_key = api_key
-        self.api_url = api_url or DEFAULT_API_URL
-
-    def __str__(self):
-        data = {
-            self.name: self.json(),
-        }
+    def as_dict(self):
+        """Returns this as a dict object suitable for printing"""
         # obscure the api key
-        data[self.name]["api_key"] = obscure_key(data[self.name]["api_key"])
-        return yaml.dump(data)
-
-    def json(self):
-        """Returns the secret as a json object"""
-        return {"api_key": self.api_key, "api_url": self.api_url}
+        data = asdict(self)
+        data["api_key"] = obscure_key(data["api_key"])
+        return data
 
 
 def _get_secrets_file() -> Path:
@@ -48,7 +54,7 @@ def get_secrets() -> Dict[str, Secret]:
         secrets = yaml.safe_load(file)
 
     return {
-        name: Secret(name, secret["api_key"], secret["api_url"])
+        name: Secret(secret["api_key"], secret["api_url"])
         for name, secret in secrets.items()
     }
 
@@ -57,7 +63,7 @@ def set_secrets(secrets: Dict[str, Secret]):
     """Sets the secrets in the config file"""
     secret_file = _get_secrets_file()
 
-    secrets_as_json = {name: secret.json() for name, secret in secrets.items()}
+    secrets_as_json = {name: asdict(secret) for name, secret in secrets.items()}
 
     with open(secret_file, "w", encoding="utf-8") as file:
         yaml.dump(secrets_as_json, file)
