@@ -24,6 +24,8 @@ docker run -it -v $HOME/.spyderbat-api:/root/.spyderbat-api spyderbat/spydertop 
 docker run -it -v /etc/localtime:/etc/localtime spyderbat/spydertop [ARGS]
 ```
 
+You can also download the bundled executable from the [releases page](https://github.com/spyderbat/spydertop/releases), which includes everything necessary to run spydertop, including a compatible python version!
+
 ## Installation
 
 Spydertop can be installed from [PyPi](https://pypi.org/project/spydertop/) with pip:

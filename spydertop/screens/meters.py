@@ -150,7 +150,7 @@ def show_network(model: AppModel):
         rx_bytes += "i"
     return add_palette(
         "  ${{{meter_label}}}Network: rx: ${{2}}{rx}b/s ${{{meter_label}}}\
-write: ${{4}}{tx}b/s ${{{meter_label}}}({reads}/{writes} reads/writes)",
+tx: ${{4}}{tx}b/s ${{{meter_label}}}({reads}/{writes} reads/writes)",
         model,
         rx=rx_bytes,
         tx=tx_bytes,

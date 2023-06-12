@@ -30,9 +30,9 @@ jobs:
           pip install --upgrade pip setuptools
           pip install setuptools_scm
           echo "Setting version to $(python -m setuptools_scm --strip-dev)"
-          echo "::set-output name=version::$(python -m setuptools_scm --strip-dev)"
+          echo "version=$(python -m setuptools_scm --strip-dev)" >> $GITHUB_OUTPUT
           echo "Setting full version to $(python -m setuptools_scm)"
-          echo "::set-output name=versionfull::$(python -m setuptools_scm)"
+          echo "versionfull=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
       - 
         name: Build Wheels
         run: |
@@ -87,7 +87,7 @@ jobs:
             asset_name: spydertop-bundled-macos-amd64
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
