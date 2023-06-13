@@ -10,19 +10,30 @@ Contains the logic to process cli arguments and start the application
 """
 
 
+from datetime import datetime, timedelta
 import gzip
+import logging
+from pathlib import Path
 from typing import Optional
 
 import click
 from click.shell_completion import CompletionItem
 import yaml
 
-from spydertop.config import DEFAULT_API_URL
-from spydertop.config.secrets import Secret, set_secrets, get_secrets
-from spydertop.config.config import Config, Context, Focus
+from spydertop.config import DEFAULT_API_URL, DIRS
+from spydertop.config.secrets import Secret
+from spydertop.config.config import (
+    DEFAULT_CONFIG_PATH,
+    Config,
+    ConfigError,
+    Context,
+    Focus,
+)
+from spydertop.screens import start_screen
+from spydertop.state import State
 
 # from spydertop.screens import start_screen
-from spydertop.utils import convert_to_seconds
+from spydertop.utils import convert_to_seconds, log
 
 
 class Timestamp(click.ParamType):
@@ -108,7 +119,7 @@ class SecretsParam(click.ParamType):
     name = "Secrets"
 
     def shell_complete(self, ctx, param, incomplete):
-        secrets = get_secrets()
+        secrets = Secret.get_secrets()
         secret_names = list(secrets.keys())
         secret_names.sort()
         return [
@@ -126,14 +137,17 @@ class ContextParam(click.ParamType):
     name = "Contexts"
 
     def shell_complete(self, ctx, param, incomplete):
-        config_obj = Config.load_default()
-        context_names = list(config_obj.contexts.keys())
-        context_names.sort()
-        return [
-            CompletionItem(context_name)
-            for context_name in context_names
-            if context_name.startswith(incomplete)
-        ]
+        try:
+            config_obj = Config.load_from_directory(Path(DIRS.user_config_dir))
+            context_names = list(config_obj.contexts.keys())
+            context_names.sort()
+            return [
+                CompletionItem(context_name)
+                for context_name in context_names
+                if context_name.startswith(incomplete)
+            ]
+        except ConfigError:
+            return []
 
 
 SUB_EPILOG = """
@@ -144,12 +158,30 @@ CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 @click.group(context_settings={**CONTEXT_SETTINGS})
 @click.version_option(None, "--version", "-V")
-def cli():
+@click.option(
+    "--config-dir",
+    "-c",
+    type=click.Path(exists=True, path_type=Path, dir_okay=True, file_okay=False),
+    default=Path(DIRS.user_config_dir),
+    help=f"The configuration file to use. Defaults to {DEFAULT_CONFIG_PATH}",
+)
+@click.pass_context
+def cli(ctx: click.Context, config_dir: Path):
     """
     Spydertop - Historical TOP Tool
 
     Run 'spydertop COMMAND --help' for more information on a command.
     """
+
+    # Load the config file
+    if not config_dir.exists() and config_dir != Path(DIRS.user_config_dir):
+        click.echo(f"Error loading config file: {config_dir} does not exist")
+        ctx.exit(1)
+    config_obj = Config.load_from_directory(config_dir)
+    ctx.obj = {
+        "config": config_obj,
+        "config_dir": config_dir,
+    }
 
 
 # ignore unknown options is necessary to allow dashes in the
@@ -196,12 +228,6 @@ fetching records from the production Spyderbat API",
     help="If set, spydertop with use the specified output file to save the loaded records",
 )
 @click.option(
-    "--confirm/--no-confirm",
-    "-c/-C",
-    default=True,
-    help="Ask for confirmation of values saved in the config file",
-)
-@click.option(
     "--log-level",
     type=str,
     default="WARN",
@@ -211,8 +237,16 @@ Defaults to WARN",
     envvar="SPYDERTOP_LOG_LEVEL",
 )
 @click.argument("timestamp", type=Timestamp(), required=False)
+@click.pass_context
 def load(  # pylint: disable=too-many-arguments
-    organization, machine, input_file, output, timestamp, duration, confirm, log_level
+    ctx,
+    organization,
+    machine,
+    input_file,
+    output,
+    timestamp,
+    duration,
+    log_level,
 ):
     """
     Fetches data and starts the TUI.
@@ -236,19 +270,37 @@ def load(  # pylint: disable=too-many-arguments
 
     if input_file is not None and input_file.name.endswith(".gz"):
         input_file = gzip.open(input_file.name, "rt")
+        if isinstance(input_file, gzip.GzipFile):
+            raise click.BadParameter(
+                "Input file must be a text gzip file, not a binary gzip file"
+            )
+    if input_file is None:
+        input_file = DEFAULT_API_URL
 
-    # config_obj = Config(
-    #     organization,
-    #     machine,
-    #     input_file,
-    #     output,
-    #     timestamp,
-    #     duration,
-    #     confirm,
-    #     log_level,
-    # )
+    state = State(
+        time=datetime.fromtimestamp(timestamp) if timestamp else None,
+        start_duration=timedelta(seconds=duration),
+        org_uid=organization,
+        source_uid=machine,
+    )
 
-    # start_screen(config_obj)
+    # allow for logging from the underlying library
+    # and saving to a file if it is requested
+    if log_level.endswith("+"):
+        log_level = log_level[:-1]
+        log.log_level = logging.getLevelName(log_level)
+        log.initialize_development_logging()
+    else:
+        log.log_level = logging.getLevelName(log_level)
+
+    if isinstance(log.log_level, str):
+        log.log_level = logging.WARN
+        log.warn(
+            "Invalid log level specified, defaulting to WARN. \
+See --help for a list of valid log levels."
+        )
+
+    start_screen(ctx.obj["config"], ctx.obj["config_dir"], state, input_file, output)
 
 
 @cli.group()
@@ -261,22 +313,37 @@ def config():
     """
 
 
+def get_config_from_ctx(ctx: click.Context) -> Config:
+    """
+    Gets the configuration object from the context, or exits if it is not set
+    """
+    ctx.ensure_object(dict)
+    inner_config: Config = ctx.obj.get("config", None)
+    if inner_config is None:
+        click.echo("No config loaded")
+        ctx.exit(1)
+    return inner_config
+
+
 @config.command("get")
-def get_config():
+@click.pass_context
+def get_config(ctx: click.Context):
     """
     Gets the currently loaded configuration
     """
-    inner_config = Config.load_default()
+    inner_config = get_config_from_ctx(ctx)
+
     click.echo(yaml.dump(inner_config.as_dict()))
 
 
 @config.command()
 @click.argument("name", required=False, type=ContextParam())
-def get_context(name: Optional[str] = None):
+@click.pass_context
+def get_context(ctx: click.Context, name: Optional[str] = None):
     """
     Gets the currently loaded configuration
     """
-    inner_config = Config.load_default()
+    inner_config = get_config_from_ctx(ctx)
     if name is not None:
         contexts = {name: inner_config.contexts[name].as_dict()}
     else:
@@ -321,7 +388,9 @@ def get_context(name: Optional[str] = None):
     help="ID of the machine or cluster to load",
     # required=True,  # TODO: add automatic source determining
 )
-def set_context(
+@click.pass_context
+def set_context(  # pylint: disable=too-many-arguments
+    ctx: click.Context,
     secret: str,
     name: str,
     organization: str,
@@ -331,42 +400,44 @@ def set_context(
     """
     Create or update a context for loading data.
     """
-    inner_config = Config.load_default()
+    inner_config = get_config_from_ctx(ctx)
     if source is not None and focus is not None:
         focuses = Focus.get_focuses(source, focus)
     else:
         focuses = []
     inner_config.contexts[name] = Context(secret, organization, source, focuses)
-    inner_config.save_default()
+    inner_config.save_to_directory(ctx.obj["config_dir"])
 
 
 @config.command()
 @click.argument("name", type=ContextParam(), required=True)
-def use_context(name: str):
+@click.pass_context
+def use_context(ctx: click.Context, name: str):
     """
     Set the current context to use.
     """
-    inner_config = Config.load_default()
+    inner_config = get_config_from_ctx(ctx)
     if name not in inner_config.contexts:
         click.echo(f"Context {name} does not exist.")
         return
     inner_config.active_context = name
-    inner_config.save_default()
+    inner_config.save_to_directory(ctx.obj["config_dir"])
 
 
 @config.command()
 @click.argument("name", type=ContextParam(), required=True)
-def delete_context(name: str):
+@click.pass_context
+def delete_context(ctx: click.Context, name: str):
     """
     Delete a context from the configuration.
     """
-    inner_config = Config.load_default()
+    inner_config = get_config_from_ctx(ctx)
     if name not in inner_config.contexts:
         click.echo(f"Context {name} does not exist.")
         return
     click.confirm(f"Are you sure you want to delete context {name}?", abort=True)
     del inner_config.contexts[name]
-    inner_config.save_default()
+    inner_config.save_to_directory(ctx.obj["config_dir"])
 
 
 @config.command("set-secret")
@@ -378,16 +449,16 @@ def delete_context(name: str):
     default="default",
 )
 @click.option(
-    "--apikey",
     "--api-key",
+    "--apikey",
     "-k",
     type=str,
     help="API key generated via the Spyderbat UI",
     required=True,
 )
 @click.option(
-    "--apiurl",
     "--api-url",
+    "--apiurl",
     "-u",
     type=str,
     help="URL target for api queries.",
@@ -401,7 +472,7 @@ def set_api_secret(
     """
     if not name:
         name = "default"
-    secrets = get_secrets()
+    secrets = Secret.get_secrets()
     if name in secrets:
         click.confirm(
             f"Secret {name} already exists. Are you sure you want to overwrite it?",
@@ -413,14 +484,14 @@ def set_api_secret(
 
     secrets[name] = Secret(api_key) if api_url is None else Secret(api_key, api_url)
 
-    set_secrets(secrets)
+    Secret.set_secrets(secrets)
 
 
 @config.command("get-secret")
 @click.argument("name", required=False, type=SecretsParam())
 def get_api_secret(name=None):
     """Describe one or many api secrets."""
-    secrets = get_secrets()
+    secrets = Secret.get_secrets()
     if name:
         secrets = {name: secrets[name].as_dict()}
     else:
@@ -434,11 +505,11 @@ def get_api_secret(name=None):
 def delete_api_secret(name=None):
     """Delete an api secret"""
     assert name is not None
-    secrets = get_secrets()
+    secrets = Secret.get_secrets()
     if name not in secrets:
         click.echo(f"Secret {name} does not exist.")
         return
     click.confirm(f"Are you sure you want to delete secret {name}?", abort=True)
 
     del secrets[name]
-    set_secrets(secrets)
+    Secret.set_secrets(secrets)

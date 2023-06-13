@@ -15,6 +15,9 @@ from dataclasses import asdict, dataclass, field
 import yaml
 
 from spydertop.config import DIRS
+from spydertop.config.secrets import Secret
+
+DEFAULT_CONFIG_PATH = Path(DIRS.user_config_dir) / "config.yaml"
 
 
 @dataclass
@@ -55,8 +58,8 @@ class Context:
     """
 
     secret_name: str
-    org_uid: str
-    source: Optional[str] = None
+    org_uid: Optional[str]
+    source: Optional[str]
     focus: List[Focus] = field(default_factory=list)
 
     def as_dict(self):
@@ -65,6 +68,10 @@ class Context:
             **asdict(self),
             "focus": [asdict(f) for f in self.focus],
         }
+
+    def get_secret(self) -> Optional[Secret]:
+        """Returns the secret that this context uses"""
+        return Secret.get_secrets().get(self.secret_name, None)
 
 
 @dataclass
@@ -101,12 +108,19 @@ class Config:
     """
 
     contexts: Dict[str, Context]
-    active_context: str
+    active_context: Optional[str]
     settings: Settings
 
     @staticmethod
-    def load_from_file(file: Path):
+    def load_from_directory(config_dir: Path):
         """Loads a config instance from a file"""
+        file = config_dir / "config.yaml"
+        if not file.exists():
+            return Config(
+                contexts={},
+                settings=Settings(),
+                active_context=None,
+            )
         data = yaml.safe_load(file.read_text())
         try:
             settings = Settings(**data["settings"])
@@ -125,22 +139,10 @@ class Config:
         except KeyError as exc:
             raise ConfigError(f"Failed to load config, missing key: {exc}") from exc
 
-    @staticmethod
-    def load_default():
-        """Loads the default config"""
-        default_path = Path(DIRS.user_config_dir) / "config.yaml"
-        if default_path.exists():
-            return Config.load_from_file(default_path)
-        return Config(
-            contexts={},
-            settings=Settings(),
-            active_context="default",
-        )
-
-    def save_default(self):
+    def save_to_directory(self, config_dir: Path):
         """Saves the default config"""
-        default_path = Path(DIRS.user_config_dir) / "config.yaml"
-        default_path.write_text(yaml.dump(self.as_dict()))
+        config_path = config_dir / "config.yaml"
+        config_path.write_text(yaml.dump(self.as_dict()))
 
     def as_dict(self):
         """Returns the config as a dictionary"""

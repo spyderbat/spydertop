@@ -15,15 +15,16 @@ import asyncio
 from collections import defaultdict
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import timedelta
+import gzip
 import multiprocessing
-from typing import DefaultDict, Dict, List, Optional, Union
+from typing import DefaultDict, Dict, List, Optional, TextIO, Union
 
 import orjson
 import urllib3
 from urllib3.exceptions import MaxRetryError
 
-from spydertop.config import Config
-from spydertop.utils import log
+from spydertop.config.secrets import Secret
+from spydertop.utils import log, obscure_key
 from spydertop.config.cache import DEFAULT_TIMEOUT, cache_block
 from spydertop.utils.types import APIError, Record, TimeSpanTracker
 
@@ -37,132 +38,138 @@ class RecordPool:
 
     loaded: bool = False
     progress: float = 0.0
-    records: DefaultDict[str, Dict[str, Record]]
+    input_: Union[Secret, TextIO]
+    records: DefaultDict[str, Dict[str, Record]] = defaultdict(lambda: {})
     orgs: List[dict] = []
     sources: Dict[str, List[dict]] = {}
     clusters: Dict[str, List[dict]] = {}
 
-    _config: Config
+    _output: Optional[TextIO]
     _time_span_tracker = TimeSpanTracker()
     _connection_pool: Optional[urllib3.PoolManager] = None
 
-    def __init__(self, config: Config):
-        self.records = defaultdict(lambda: {})
-        self._config = config
+    def __init__(
+        self,
+        input_src: Union[Secret, TextIO],
+        output: Optional[TextIO] = None,
+    ):
+        self.input_ = input_src
+        self._output = output
 
-    def init_api(self) -> None:
-        """Initialize the API client"""
-        if isinstance(self._config.input, str) and self._connection_pool is None:
+        # if the output file is gzipped, open it with gzip
+        if self._output and self._output.name.endswith(".gz"):
+            self._output = gzip.open(self._output.name, "wt")
+        if isinstance(self.input_, Secret) and self._connection_pool is None:
             self._connection_pool = urllib3.PoolManager()
 
-    def load(
+    def load_api( # pylint: disable=too-many-arguments
         self,
-        timestamp: Optional[float],
-        duration: Optional[timedelta] = None,
+        org_uid: str,
+        source_uid: str,
+        timestamp: float,
+        duration: timedelta,
         before=timedelta(seconds=120),
     ):
         """Load data from the source, either the API or a file, then process it"""
-        self.loaded = False
-        if duration is None:
-            duration = self._config.start_duration
         log.info(f"Loading data for time: {timestamp} and duration: {duration}")
         self.loaded = False
         self.progress = 0.0
 
-        source = self._config.input
+        data_source = self.input_
 
-        if isinstance(source, str):
-            # url, load data from api
+        if not isinstance(data_source, Secret):
+            raise RuntimeError("Data source must be a Secret when loading from API")
 
-            if timestamp is None:
-                raise RuntimeError("No start time specified")
-            if not self._config.api_key:
-                raise RuntimeError("No API key specified")
-            assert self._config.machine is not None
+        input_data = {
+            # request data from a bit earlier, so that the information is properly filled out
+            "start_time": timestamp - before.total_seconds() + 30,
+            "end_time": timestamp + duration.total_seconds(),
+            "org_uid": org_uid,
+        }
 
-            input_data = {
-                # request data from a bit earlier, so that the information is properly filled out
-                "start_time": timestamp - before.total_seconds() + 30,
-                "end_time": timestamp + duration.total_seconds(),
-                "org_uid": self._config.org,
-            }
+        # we need more than one event_top record, so a buffer of 30 seconds is used
+        # to make sure the data is available
+        self._time_span_tracker.add_time_span(
+            input_data["start_time"] + 30, input_data["end_time"]
+        )
 
-            # we need more than one event_top record, so a buffer of 30 seconds is used
-            # to make sure the data is available
-            self._time_span_tracker.add_time_span(
-                input_data["start_time"] + 30, input_data["end_time"]
+        if source_uid.startswith("clus:"):
+            # this is a cluster, so we need to get the k8s data
+            # and then query each node
+            log.info("Loading cluster data")
+            k8s_data = self.guard_api_call(
+                method="POST",
+                url="/api/v1/source/query/",
+                **input_data,
+                src_uid=source_uid,
+                data_type="k8s",
             )
-
-            if self._config.machine.startswith("clus:"):
-                # this is a cluster, so we need to get the k8s data
-                # and then query each node
-                log.info("Loading cluster data")
-                k8s_data = self.guard_api_call(
-                    method="POST",
-                    url="/api/v1/source/query/",
-                    **input_data,
-                    src_uid=self._config.machine,
-                    data_type="k8s",
-                )
-                log.info("Parsing cluster data")
-                self._process_records(k8s_data.split(b"\n"), 0.1, parallel=False)
-                log.info("Loading node data")
-                sources = [
-                    node["muid"] for node in self.records["model_k8s_node"].values()
-                ]
-            else:
-                self.progress = 0.1
-                log.info("Loading machine data")
-                sources = [self._config.machine]
-
-            def call_api(data_type: str, src_id: str):
-                ndjson = self.guard_api_call(
-                    method="POST",
-                    url="/api/v1/source/query/",
-                    **input_data,
-                    src_uid=src_id,
-                    data_type=data_type,
-                )
-                return ndjson.split(b"\n")
-
-            async def load():
-                nonlocal lines
-                # future is unsubscriptable in python 3.7
-                threads: List[Future] = []  # : List[Future[List[bytes]]]
-                with ThreadPoolExecutor() as executor:
-                    for source in sources:
-                        for data_type in ["htop", "spydergraph"]:
-                            threads.append(executor.submit(call_api, data_type, source))
-                    for thread in as_completed(threads):
-                        self._process_records(
-                            thread.result(), 0.9 / len(threads), parallel=False
-                        )
-                        await asyncio.sleep(0)  # try to let the UI update
-
-            asyncio.run(load())
+            log.info("Parsing cluster data")
+            self._process_records(k8s_data.split(b"\n"), 0.1, parallel=False)
+            log.info("Loading node data")
+            sources = [node["muid"] for node in self.records["model_k8s_node"].values()]
         else:
-            # file, read in records and parse
-            log.info(f"Reading records from input file: {source.name}")
+            self.progress = 0.1
+            log.info("Loading machine data")
+            sources = [source_uid]
 
-            lines = source.readlines()
-            if len(lines) == 0:
-                # file was most likely already read
-                raise RuntimeError(
-                    "The current time is unloaded, but input is from a file. \
-No more records can be loaded."
-                )
-            self._process_records(lines, 1.0)
+        def call_api(data_type: str, src_id: str):
+            ndjson = self.guard_api_call(
+                method="POST",
+                url="/api/v1/source/query/",
+                **input_data,
+                src_uid=src_id,
+                data_type=data_type,
+            )
+            return ndjson.split(b"\n")
 
-        if self._config.output:
+        async def load():
+            nonlocal lines
+            # future is unsubscriptable in python 3.7
+            threads: List[Future] = []  # : List[Future[List[bytes]]]
+            with ThreadPoolExecutor() as executor:
+                for source in sources:
+                    for data_type in ["htop", "spydergraph"]:
+                        threads.append(executor.submit(call_api, data_type, source))
+                for thread in as_completed(threads):
+                    self._process_records(
+                        thread.result(), 0.9 / len(threads), parallel=False
+                    )
+                    await asyncio.sleep(0)  # try to let the UI update
+
+        asyncio.run(load())
+
+        if self._output is not None:
             lines = [
                 orjson.dumps(record).decode() + "\n"
                 for group in self.records.values()
                 for record in group.values()
             ]
-            self._config.output.writelines(lines)
+            self._output.writelines(lines)
 
         self.loaded = True
         log.debug("Completed loading records")
+
+    def load_file(self):
+        """Load data from a file, then process it"""
+        self.loaded = False
+        self.progress = 0.0
+        if isinstance(self.input_, Secret):
+            raise RuntimeError("Data source must be a file when loading from file")
+        # file, read in records and parse
+        log.info(f"Reading records from input file: {self.input_.name}")
+
+        lines = self.input_.readlines()
+        if len(lines) == 0:
+            # file was most likely already read
+            raise RuntimeError(
+                "The current time is unloaded, but input is from a file. \
+No more records can be loaded."
+            )
+        self._process_records(lines, 1.0)
+
+        self.loaded = True
+        log.debug("Completed loading records from file")
 
     def _process_records(
         self,
@@ -282,23 +289,26 @@ No more records can be loaded."
 
         if self._connection_pool is None:
             raise RuntimeError("Connection pool is not initialized")
-        if not isinstance(self._config.input, str):
-            raise ValueError("Data cannot be loaded from an API; there is no url")
+        if not isinstance(self.input_, Secret):
+            raise ValueError(
+                "Data cannot be loaded from an API, input is from somewhere else."
+            )
 
-        full_url = self._config.input + url
+        if not self.input_.api_url.startswith("http"):
+            base_url = f"https://{self.input_.api_url}"
+        else:
+            base_url = self.input_.api_url
+
+        full_url = base_url + url
         conn_pool = self._connection_pool
 
         def make_api_call():
-            if self._config.api_key is None:
-                raise APIError("API key is not set")
+            assert isinstance(self.input_, Secret)
             headers = {
-                "Authorization": f"Bearer {self._config.api_key}",
+                "Authorization": f"Bearer {self.input_.api_key}",
                 "Content-Type": "application/json",
             }
-            assert isinstance(self._config.input, str)
-            log.debug(
-                f"Making API call to {self._config.input + url} with ", input_data
-            )
+            log.debug(f"Making API call to {full_url} with ", input_data)
             try:
                 api_response = conn_pool.request(
                     method,
@@ -316,7 +326,7 @@ No more records can be loaded."
             except MaxRetryError as exc:
                 raise APIError(
                     "There was an issue trying to connect to the API."
-                    f"Is the url {self._config.input} correct?"
+                    f"Is the url {self.input_} correct?"
                 ) from exc
             except Exception as exc:
                 log.traceback(exc)
@@ -334,8 +344,7 @@ Args: {exc.args}\
 
             if api_response.status != 200:
                 sanitized_headers = {
-                    "Authorization": f"Bearer {self._config.api_key[:3]}"
-                    f"...{self._config.api_key[-3:]}",
+                    "Authorization": f"Bearer {obscure_key(self.input_.api_key)}",
                     **headers,
                 }
                 log.debug(
@@ -358,10 +367,18 @@ Context-UID: {api_response.headers.get("x-context-uid", None) if api_response.he
 
         if enable_cache:
             data = cache_block(
-                orjson.dumps((self._config.api_key, method, full_url, input_data)),
+                orjson.dumps((self.input_.api_key, method, full_url, input_data)),
                 make_api_call,
                 timeout=timeout,
             )
         else:
             data = make_api_call()
         return data
+
+    def clear(self):
+        """Clear all data from the loader"""
+        self.records.clear()
+        self.orgs.clear()
+        self.sources.clear()
+        self.clusters.clear()
+        self._time_span_tracker = TimeSpanTracker()

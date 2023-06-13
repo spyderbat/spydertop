@@ -87,14 +87,14 @@ class FailureFrame(Frame):
         )
         layout2.add_widget(Button("Quit", self._quit))
 
-        self.set_theme(model.config["theme"])
+        self.set_theme(model.settings.theme)
         self.fix()
 
     def update(self, frame_no):
-        self.set_theme(self._model.config["theme"])
+        self.set_theme(self._model.settings.theme)
         self._time_button.text = (
-            f"Reload {self._model.time}"
-            if self._model.time is not None
+            f"Reload {self._model.state.time}"
+            if self._model.state.time is not None
             else "Retry loading"
         )
         super().update(frame_no)

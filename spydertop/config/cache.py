@@ -12,14 +12,15 @@ A module for handling caching of data from expensive operations
 from datetime import timedelta, datetime
 import hashlib
 from pathlib import Path
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union
 import gzip
+
+import yaml
 
 from spydertop.config import DIRS
 from spydertop.utils import log
 
 DEFAULT_TIMEOUT = timedelta(minutes=5)
-# TODO: add a cache for some settings, such as has_submitted_feedback
 
 
 def cache_block(
@@ -40,6 +41,26 @@ def cache_block(
         result = func()
         _cache_set(hashed_key, result)
     return result
+
+
+def get_user_cache() -> Dict[str, Any]:
+    """Get the user cache"""
+    cache_file = Path(DIRS.user_cache_dir) / "user_cache.yaml"
+    if cache_file.exists():
+        cache = yaml.safe_load(cache_file.read_text())
+    else:
+        cache = {}
+    return cache
+
+
+def set_user_cache(key: str, value: Any):
+    """Set a value in the user cache"""
+    # this is used infrequently for now, so we are not going to worry about
+    # the performance of this
+    cache = get_user_cache()
+    cache[key] = value
+    cache_file = Path(DIRS.user_cache_dir) / "user_cache.yaml"
+    cache_file.write_text(yaml.safe_dump(cache))
 
 
 def _cache_get(key: str, timeout: timedelta):

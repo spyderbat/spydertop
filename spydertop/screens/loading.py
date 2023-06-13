@@ -74,6 +74,8 @@ class LoadingFrame(Frame):
         )
 
         self._model = model
+        if not model.thread:
+            model.init(model.state.start_duration)
 
         layout = Layout([1], fill_frame=True)
         self.add_layout(layout)
@@ -110,7 +112,7 @@ class LoadingFrame(Frame):
             )
         )
 
-        self.set_theme(self._model.config["theme"])
+        self.set_theme(self._model.settings.theme)
         self.fix()
 
     def update_logo(self):
@@ -135,7 +137,7 @@ class LoadingFrame(Frame):
         )
 
     def update(self, frame_no):
-        self.set_theme(self._model.config["theme"])
+        self.set_theme(self._model.settings.theme)
 
         # see if the model is done
         if self._model.thread is not None:

@@ -12,7 +12,6 @@ to fetch and cache data from the Spyderbat API
 
 from itertools import groupby
 import threading
-import gzip
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, Optional, List, Any, Tuple
 import uuid
@@ -20,24 +19,37 @@ import uuid
 import orjson
 import urllib3
 
-from spydertop.config import DEFAULT_API_URL, Config
+from spydertop.config import DEFAULT_API_URL
+from spydertop.config.cache import set_user_cache
+from spydertop.config.config import Context, Settings
+from spydertop.config.secrets import Secret
 from spydertop.recordpool import RecordPool
+from spydertop.state import State
 from spydertop.utils import get_timezone, log, sum_element_wise
 from spydertop.utils.types import APIError, Record, Tree
 from spydertop.utils.cursorlist import CursorList
 from spydertop.constants import API_LOG_TYPES
 
+DEFAULT_DURATION = timedelta(minutes=5)
+
 
 class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """
     The main app model for the application, containing all logic necessary
-    to asynchronously fetch and cache data from the Spyderbat API. It also
-    provides a collection of quick methods to get data from the model.
+    to provide data and state to the application.
+
+    Data is divided into a few main objects:
+    - The record pool, which contains all records fetched from the API
+    - The settings, which contains all options that persist across sessions
+    - The state, which contains internal state and options that do not persist
+        across sessions, such as command line arguments
     """
 
     failed: bool = False
     failure_reason: str = ""
-    config: Config
+    settings: Settings
+    context: Optional[Context] = None
+    state: State
     columns_changed: bool = False
     thread: Optional[threading.Thread] = None
     selected_machine: Optional[str] = None
@@ -46,7 +58,6 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
     # register_state
     _cache: Dict[str, Dict[str, Any]] = {}
 
-    _timestamp: Optional[float] = None
     _last_good_timestamp: Optional[float] = None
     _session_id: str
     _http_client: urllib3.PoolManager
@@ -60,59 +71,56 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
     # meminfo may not be available for every time
     _meminfo: Dict[str, Optional[Dict[str, int]]] = {}
 
-    def __init__(self, config: Config) -> None:
-        self.config = config
+    def __init__(
+        self, settings: Settings, state: State, record_pool: RecordPool
+    ) -> None:
+        self.settings = settings
+        self.state = state
         self._session_id = uuid.uuid4().hex
         self._http_client = urllib3.PoolManager()
-        self._record_pool = RecordPool(config)
+        self._record_pool = record_pool
 
     def __del__(self):
         if self.thread:
             self.thread.join()
 
-    def init(self) -> None:
+    def init(self, start_duration: Optional[timedelta]) -> None:
         """Initialize the model, loading data from the source. Requires config to be complete"""
-        self._timestamp = (
-            self.config.start_time.astimezone(timezone.utc).timestamp()
-            if self.config.start_time
-            else None
-        )
-
-        self._record_pool.init_api()
-
-        if not self.config.is_complete:
-            # ideally, this would never happen, as the configuration screen
-            # should complete the configuration before the model is initialized
-            raise RuntimeError("Configuration is incomplete, cannot load data")
 
         def guard():
             try:
-                self.load_data(self._timestamp, self.config.start_duration)
+                self.load_data(self.timestamp, start_duration)
             except Exception as exc:  # pylint: disable=broad-except
                 self.fail("An exception occurred while loading data")
                 log.traceback(exc)
-
-        # if the output file is gzipped, open it with gzip
-        if self.config.output and self.config.output.name.endswith(".gz"):
-            self.config.output = gzip.open(self.config.output.name, "wt")
 
         thread = threading.Thread(target=guard)
         thread.start()
         self.thread = thread
 
-    def init_api(self):
-        """Initialize the API client"""
-        self._record_pool.init_api()
-
     def load_data(
         self,
         timestamp: Optional[float],
-        duration: Optional[timedelta] = None,
+        duration: Optional[timedelta],
         before=timedelta(seconds=120),
     ) -> None:
         """Load data from the source, either the API or a file, then process it"""
         try:
-            self._record_pool.load(timestamp, duration, before)
+            if isinstance(self._record_pool.input_, Secret):
+                if not self.state.can_load_from_api() or timestamp is None:
+                    raise RuntimeError("Not enough information to load data from API")
+                assert (
+                    self.state.org_uid is not None and self.state.source_uid is not None
+                )
+                self._record_pool.load_api(
+                    self.state.org_uid,
+                    self.state.source_uid,
+                    timestamp,
+                    duration or timedelta(minutes=5),
+                    before,
+                )
+            else:
+                self._record_pool.load_file()
             log.debug(
                 "Loaded Items: ",
                 {key: len(value) for key, value in self._record_pool.records.items()},
@@ -132,7 +140,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
         event_top_data = self._record_pool.records["event_top_data"].values()
         event_top_data = groupby(event_top_data, lambda record: record["muid"])
         self._tops = {
-            muid: CursorList("time", list(records), self._timestamp)
+            muid: CursorList("time", list(records), self.timestamp)
             for muid, records in event_top_data
         }
 
@@ -163,38 +171,17 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
         """
         try:
             for c_list in self._tops.values():
-                c_list.update_cursor(self._timestamp)
+                c_list.update_cursor(self.timestamp)
             # if the time is None, there was no specified time, so
             # go back to the beginning of the records
-            if self._timestamp is None:
+            if self.timestamp is None:
                 self.recover("reload")
                 return
 
-            if not self._record_pool.is_loaded(self._timestamp) and isinstance(
-                self.config.input, str
+            if not self._record_pool.is_loaded(self.timestamp) and isinstance(
+                self._record_pool.input_, str
             ):
-                # this is currently disabled due to errors
-                #
-                # # load data for a time farther away from the loaded
-                # # time if self._timestamp is close
-                # # this is to avoid loading data that is not needed
-                # if len(self._tops.data) == 0:
-                #     closest_time = self._timestamp
-                #     offset = 0
-                # # make sure to leave a buffer of 2 event_tops
-                # elif not self._tops.is_valid(-2):
-                #     closest_time = self._tops.data[2]["time"]
-                #     offset = -298
-                # else:
-                #     closest_time = self._tops[0]["time"]
-                #     offset = +298
-
-                # time_to_load = (
-                #     self._timestamp
-                #     if abs(self._timestamp - closest_time) > 300
-                #     else closest_time + offset
-                # )
-                time_to_load = self._timestamp
+                time_to_load = self.timestamp
 
                 thread = threading.Thread(
                     target=lambda: self.load_data(
@@ -226,7 +213,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
             log.traceback(exc)
             self.fail(
                 f"""\
-The time {self.time} is invalid, \
+The time {self.state.time} is invalid, \
 not enough information could be loaded.\
 """
             )
@@ -263,25 +250,24 @@ not enough information could be loaded.\
                 log.traceback(exc)
         return self._record_pool.orgs
 
-    def get_sources(
+    def get_sources( # pylint: disable=too-many-arguments
         self,
+        org_uid: str,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         uid: Optional[str] = None,
         force_reload: bool = False,
     ) -> Optional[List[dict]]:
         """Fetch a list of sources for this api_key"""
-        if self.config.org is None:
-            return None
-        if self._record_pool.sources.get(self.config.org) is None or force_reload:
+        if self._record_pool.sources.get(org_uid) is None or force_reload:
             try:
                 self._record_pool.load_sources(
-                    self.config.org, page, page_size, uid, force_reload
+                    org_uid, page, page_size, uid, force_reload
                 )
-                if self._record_pool.sources.get(self.config.org) is not None:
+                if self._record_pool.sources.get(org_uid) is not None:
                     self.log_api(
                         API_LOG_TYPES["sources"],
-                        {"count": len(self._record_pool.sources[self.config.org])},
+                        {"count": len(self._record_pool.sources[org_uid])},
                     )
             except APIError as exc:
                 log.traceback(exc)
@@ -290,19 +276,19 @@ not enough information could be loaded.\
             except Exception as exc:  # pylint: disable=broad-except
                 self.fail("An exception occurred while loading sources")
                 log.traceback(exc)
-        return self._record_pool.sources.get(self.config.org)
+        return self._record_pool.sources.get(org_uid)
 
-    def get_clusters(self, force_reload: bool = False) -> Optional[List[dict]]:
+    def get_clusters(
+        self, org_uid: str, force_reload: bool = False
+    ) -> Optional[List[dict]]:
         """Fetch a list of clusters for this api_key"""
-        if self.config.org is None:
-            return None
-        if self._record_pool.clusters.get(self.config.org) is None or force_reload:
+        if self._record_pool.clusters.get(org_uid) is None or force_reload:
             try:
-                self._record_pool.load_clusters(self.config.org, force_reload)
-                if self._record_pool.clusters.get(self.config.org) is not None:
+                self._record_pool.load_clusters(org_uid, force_reload)
+                if self._record_pool.clusters.get(org_uid) is not None:
                     self.log_api(
                         API_LOG_TYPES["clusters"],
-                        {"count": len(self._record_pool.clusters[self.config.org])},
+                        {"count": len(self._record_pool.clusters[org_uid])},
                     )
             except APIError as exc:
                 log.traceback(exc)
@@ -311,18 +297,18 @@ not enough information could be loaded.\
             except Exception as exc:  # pylint: disable=broad-except
                 self.fail("An exception occurred while loading clusters")
                 log.traceback(exc)
-        return self._record_pool.clusters.get(self.config.org)
+        return self._record_pool.clusters.get(org_uid)
 
     def log_api(self, name: str, data: Dict[str, Any]) -> None:
         """Send logs to the spyderbat internal logging API"""
-        if not isinstance(self.config.input, str):
+        if not isinstance(self._record_pool.input_, str):
             url = DEFAULT_API_URL
         else:
-            url = self.config.input
+            url = self._record_pool.input_
         new_data = {
             "name": name,
             "application": "spydertop",
-            "orgId": self.config.org,
+            "orgId": self.context.org_uid if self.context is not None else None,
             "session_id": self._session_id,
             **data,
         }
@@ -333,8 +319,10 @@ not enough information could be loaded.\
             headers = {
                 "Content-Type": "application/json",
             }
-            if self.config.api_key is not None:
-                headers["Authorization"] = f"Bearer {self.config.api_key}"
+            if self.context is not None:
+                secret = self.context.get_secret()
+                if secret is not None:
+                    headers["Authorization"] = f"Bearer {secret.api_key}"
             # send the data to the API
             response = self._http_client.request(
                 "POST",
@@ -355,7 +343,7 @@ not enough information could be loaded.\
     def submit_feedback(self, feedback: str) -> None:
         """Submit feedback to the spyderbat internal logging API"""
         self.log_api(API_LOG_TYPES["feedback"], {"message": feedback})
-        self.config["has_submitted_feedback"] = True
+        set_user_cache("has_submitted_feedback", True)
 
     def get_value(self, key, muid: Optional[str], previous=False) -> Any:
         """Provides the specified field on the most recent or the previous
@@ -425,13 +413,13 @@ not enough information could be loaded.\
         # add the root processes to the tree
         if kthreadd:
             self._tree[kthreadd] = AppModel._make_branch(
-                kthreadd, processes_w_children, not self.config["collapse_tree"]
+                kthreadd, processes_w_children, not self.settings.collapse_tree
             )
             # root processes are always enabled
             self._tree[kthreadd] = (True, self._tree[kthreadd][1])
         if init:
             self._tree[init] = AppModel._make_branch(
-                init, processes_w_children, not self.config["collapse_tree"]
+                init, processes_w_children, not self.settings.collapse_tree
             )
             self._tree[init] = (True, self._tree[init][1])
 
@@ -446,7 +434,7 @@ not enough information could be loaded.\
 
         # the user probably wants to get their bearings
         # before moving time again
-        self.config["play"] = False
+        self.state.play = False
 
         # we can only revert if we have a previous time
         if method == "revert" and self._last_good_timestamp is None:
@@ -479,10 +467,10 @@ not enough information could be loaded.\
 
             elif method == "retry":
                 log.info("Retrying loading from the API.")
-                if self._timestamp is None:
+                if self.timestamp is None:
                     self.fail("No timestamp to retry loading from.")
                     return
-                self.load_data(self._timestamp)
+                self.load_data(self.timestamp, DEFAULT_DURATION)
 
             elif isinstance(method, float):
                 log.info("Loading from custom time.")
@@ -492,7 +480,7 @@ not enough information could be loaded.\
             if not self.is_valid():
                 self.fail("Recovering failed to find a valid time.")
                 et_data = self._record_pool.records["event_top_data"]
-                log.debug(f"Time: {self._timestamp}, # of Records: {len(et_data)}")
+                log.debug(f"Time: {self.state.time}, # of Records: {len(et_data)}")
                 return
 
             self.failed = False
@@ -521,7 +509,7 @@ not enough information could be loaded.\
             muid in self._tops
             and self._tops[muid].is_valid(0)
             and self._tops[muid].is_valid(-1)
-            and abs(self._tops[muid][0]["time"] - self._timestamp) < grace_period
+            and abs(self._tops[muid][0]["time"] - self.timestamp) < grace_period
         )
 
     def use_state(
@@ -542,18 +530,18 @@ not enough information could be loaded.\
         loaded to be able to use the data"""
         return (
             self._record_pool.loaded
-            and self._timestamp is not None
+            and self.timestamp is not None
             and (
-                self._record_pool.is_loaded(self._timestamp)
-                or not isinstance(self.config.input, str)
+                self._record_pool.is_loaded(self.timestamp)
+                or not isinstance(self._record_pool.input_, str)
             )
         )
 
     def clear(self) -> None:
         """Remove all loaded data from the model"""
-        self._timestamp = None
+        self.state.time = None
         self._last_good_timestamp = None
-        self._record_pool = RecordPool(self.config)
+        self._record_pool.clear()
 
         self._tree = None
         self._tops = {}
@@ -567,7 +555,7 @@ not enough information could be loaded.\
     def is_loaded(self, timestamp: float) -> bool:
         """Return whether the model has loaded data for the given time"""
         return self._record_pool.is_loaded(timestamp) or not isinstance(
-            self.config.input, str
+            self._record_pool.input_, str
         )
 
     def get_record_by_id(self, record_id: str) -> Optional[Record]:
@@ -588,14 +576,14 @@ not enough information could be loaded.\
         return self._record_pool.progress
 
     @property
-    def state(self) -> str:
+    def status(self) -> str:
         """The current status of the model"""
         if log.log_level <= log.DEBUG:
             try:
                 return log.get_last_line()
             except IndexError:
                 pass
-        return f"Time: {self.time}"
+        return f"Time: {self.state.time}"
 
     @property
     def memory(self) -> Optional[Dict[str, int]]:
@@ -661,25 +649,21 @@ not enough information could be loaded.\
             raise RuntimeError("The tree is not yet loaded.")
         return self._tree
 
-    # time properties
-    @property
-    def time(self) -> Optional[datetime]:
-        """The current time, as a datetime object"""
-        if self._timestamp is None:
-            return None
-        return datetime.fromtimestamp(self._timestamp, tz=timezone.utc).astimezone(
-            get_timezone(self)
-        )
-
     @property
     def timestamp(self) -> Optional[float]:
         """The current time, as a float"""
-        return self._timestamp
+        return self.state.time.timestamp() if self.state.time is not None else None
 
     @timestamp.setter
     def timestamp(self, value: Optional[float]) -> None:
         # set the current time and fix the state
-        self._timestamp = value
+        self.state.time = (
+            datetime.fromtimestamp(value, tz=timezone.utc).astimezone(
+                get_timezone(self.settings)
+            )
+            if value is not None
+            else None
+        )
         self._fix_state()
         if not self.failed:
-            self._last_good_timestamp = self._timestamp
+            self._last_good_timestamp = self.timestamp

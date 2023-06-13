@@ -10,6 +10,7 @@ This module contains a table widget which displays data in a tabular format.
 It extends the functionality of the asciimatics.widgets.MultiColumnListBox
 """
 
+from dataclasses import dataclass
 import re
 from typing import Any, Dict, List, NewType, Optional, Tuple, Union
 
@@ -18,14 +19,23 @@ from asciimatics.event import KeyboardEvent, MouseEvent
 from asciimatics.widgets import Widget
 from asciimatics.parsers import Parser
 from asciimatics.strings import ColouredText
+from spydertop.config.config import Settings
 from spydertop.constants.columns import Column
+from spydertop.state import State
 from spydertop.utils import align_with_overflow
 
 from spydertop.utils.types import ExtendedParser
-from spydertop.model import AppModel, Tree
-from spydertop.config import Config
+from spydertop.model import Tree
 
 InternalRow = NewType("InternalRow", Tuple[List[Union[ColouredText, str]], List[Any]])
+
+
+@dataclass
+class TableState:
+    """State for the table widget"""
+
+    id_to_follow: Optional[str] = None
+    selected_row: int = 0
 
 
 class Table(Widget):  # pylint: disable=too-many-instance-attributes
@@ -42,15 +52,18 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
     _filtered_rows: List[InternalRow] = []
     _tree_rows: Optional[List[InternalRow]] = None
 
-    _config: Config
+    _app_state: State
+    _state: TableState
+    _settings: Settings
     _parser: Parser
 
     _vertical_offset: int = 0
     _horizontal_offset: int = 0
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments
         self,
-        model: AppModel,
+        state: State,
+        settings: Settings,
         tree: Optional[Tree],
         name="Table",
         parser=ExtendedParser(),
@@ -59,15 +72,10 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
             name, tab_stop=True, disabled=False, on_focus=None, on_blur=None
         )
 
-        self._state, self._set_state = model.use_state(
-            name,
-            {
-                "id_to_follow": None,
-                "selected_row": 0,
-            },
-        )
+        self._app_state = state
+        self._state, self._set_state = state.use_state(name, TableState())
         self._parser = parser
-        self._config = model.config
+        self._settings = settings
         self.tree = tree
 
     def update(
@@ -75,9 +83,9 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
     ):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         assert self._frame is not None
         # select the followed id
-        if self._state["id_to_follow"] is not None and self._config["follow_record"]:
+        if self._state.id_to_follow is not None and self._settings.follow_record:
             for i, row in enumerate(self._filtered_rows):
-                if row[1][0] == self._state["id_to_follow"]:
+                if row[1][0] == self._state.id_to_follow:
                     self.value = i
                     break
         else:
@@ -88,7 +96,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
 
         # validate the selected row
         if (
-            self._state["selected_row"] >= len(self._filtered_rows)
+            self._state.selected_row >= len(self._filtered_rows)
             and len(self._filtered_rows) != 0
         ):
             self.value = len(self._filtered_rows) - 1
@@ -97,12 +105,12 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         if self.header_enabled:
             offset = -self._horizontal_offset
             for col in self.columns:
-                if col.header_name == self._config["sort_column"]:
+                if col.header_name == self._app_state.sort_column:
                     color, attr, background = self._frame.palette.get(
                         "table_header_selected",
                         self._frame.palette["selected_focus_field"],
                     )
-                    arrow = "↑" if self._config["sort_ascending"] else "↓"
+                    arrow = "↑" if self._app_state.sort_ascending else "↓"
                 else:
                     color, attr, background = self._frame.palette.get(
                         "table_header", self._frame.palette["title"]
@@ -134,7 +142,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                 break
             displayable_row, _ = self._filtered_rows[i]
             x_offset = -self._horizontal_offset
-            if self._state["selected_row"] == i:
+            if self._state.selected_row == i:
                 color, attr, background = self._frame.palette.get(
                     "table_selected", self._frame.palette["selected_focus_field"]
                 )
@@ -181,11 +189,11 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
     ):
         if isinstance(event, KeyboardEvent):
             if event.key_code == Screen.KEY_UP:
-                self.value = max(0, self._state["selected_row"] - 1)
+                self.value = max(0, self._state.selected_row - 1)
                 return None
             if event.key_code == Screen.KEY_DOWN:
                 self.value = min(
-                    len(self._filtered_rows) - 1, self._state["selected_row"] + 1
+                    len(self._filtered_rows) - 1, self._state.selected_row + 1
                 )
                 return None
             if event.key_code == Screen.KEY_LEFT:
@@ -195,11 +203,11 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                 self._horizontal_offset += 1
                 return None
             if event.key_code == 337:
-                self.value = max(0, self._state["selected_row"] - 5)
+                self.value = max(0, self._state.selected_row - 5)
                 return None
             if event.key_code == 336:
                 self.value = min(
-                    len(self._filtered_rows) - 1, self._state["selected_row"] + 5
+                    len(self._filtered_rows) - 1, self._state.selected_row + 5
                 )
                 return None
             if event.key_code == 393:
@@ -209,12 +217,12 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                 self._horizontal_offset += 5
                 return None
             if event.key_code == Screen.KEY_PAGE_UP:
-                self.value = max(0, self._state["selected_row"] - self._h + 1)
+                self.value = max(0, self._state.selected_row - self._h + 1)
                 return None
             if event.key_code == Screen.KEY_PAGE_DOWN:
                 self.value = min(
                     len(self._filtered_rows) - 1,
-                    self._state["selected_row"] + self._h - 1,
+                    self._state.selected_row + self._h - 1,
                 )
                 return None
             if event.key_code == Screen.KEY_HOME:
@@ -239,12 +247,12 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                         if not col.enabled:
                             continue
                         if relative_x - col.max_width - 1 < 0 or col.max_width == 0:
-                            if self._config["sort_column"] == col.header_name:
-                                self._config["sort_ascending"] = not self._config[
-                                    "sort_ascending"
-                                ]
+                            if self._app_state.sort_column == col.header_name:
+                                self._app_state.sort_ascending = (
+                                    not self._app_state.sort_ascending
+                                )
                             else:
-                                self._config["sort_column"] = col.header_name
+                                self._app_state.sort_column = col.header_name
                             break
                         relative_x -= col.max_width + 1
                 else:
@@ -284,8 +292,8 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         # if we are displaying a tree, we need to use the tree to sort
         # first, and to modify the command
         if (
-            self._config["tree"]
-            and self._config["tab"] == "processes"
+            self._settings.tree
+            and self._settings.tab == "processes"
             and self.tree is not None
         ):
             # we need the columns to have an ID
@@ -304,11 +312,11 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         """
         Filter the rows by the configured value.
         """
-        value = self._config["filter"]
+        value = self._app_state.filter
         rows = (
             self._tree_rows
-            if self._config["tree"]
-            and self._config["tab"] == "processes"
+            if self._settings.tree
+            and self._settings.tab == "processes"
             and self._tree_rows is not None
             else self._rows
         )
@@ -321,7 +329,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         self._filtered_rows = [
             row for row in rows if self._filter_predicate(row, column_matches, rest)
         ]
-        if self._state["selected_row"] >= len(self._filtered_rows):
+        if self._state.selected_row >= len(self._filtered_rows):
             self.value = 0
 
     def _filter_predicate(  # pylint: disable=too-many-return-statements
@@ -387,10 +395,10 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
             # the screen is resizing, so don't do anything
             self._vertical_offset = 0
             return
-        if self._state["selected_row"] < self._vertical_offset:
-            self._vertical_offset = self._state["selected_row"]
-        if self._state["selected_row"] >= self._vertical_offset + self._h - 1:
-            self._vertical_offset = self._state["selected_row"] - self._h + 2
+        if self._state.selected_row < self._vertical_offset:
+            self._vertical_offset = self._state.selected_row
+        if self._state.selected_row >= self._vertical_offset + self._h - 1:
+            self._vertical_offset = self._state.selected_row - self._h + 2
 
     def find(self, search: str) -> bool:
         """Finds the first row that contains the given search string."""
@@ -404,11 +412,11 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
     def get_selected(self) -> Optional[InternalRow]:
         """Returns the selected row"""
         if (
-            self._state["selected_row"] >= len(self._filtered_rows)
-            or self._state["selected_row"] < 0
+            self._state.selected_row >= len(self._filtered_rows)
+            or self._state.selected_row < 0
         ):
             return None
-        return self._filtered_rows[self._state["selected_row"]]
+        return self._filtered_rows[self._state.selected_row]
 
     def _sort_level(
         self,
@@ -468,8 +476,8 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         """Sort a list of rows by a key, putting all Nones at the end."""
         if len(rows) == 0:
             return []
-        key = self._config["sort_column"]
-        ascending = self._config["sort_ascending"]
+        key = self._app_state.sort_column
+        ascending = self._app_state.sort_ascending
         # sort by PID by default
         col_names = [_.header_name for _ in self.columns]
         if "PID" in col_names:
@@ -509,7 +517,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
     @property
     def value(self) -> int:
         """The selected row"""
-        return self._state["selected_row"]
+        return self._state.selected_row
 
     @value.setter
     def value(self, value: int):

@@ -10,7 +10,7 @@ The main frame's footer, handling the creation and resetting of the buttons widg
 as well as click handlers.
 """
 
-from typing import Callable, List, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from asciimatics.widgets import Button, Layout, Frame, Widget
 
@@ -30,7 +30,7 @@ class Footer(Layout):
         columns: List[int],
         frame: Frame,
         buttons: List[Tuple[str, Callable]],
-        end_widget: Widget,
+        end_widget: Optional[Widget],
     ):
         super().__init__(columns)
         self._widths = columns
@@ -42,7 +42,7 @@ class Footer(Layout):
         self.clear_widgets()
         self._buttons = []
         self._on_clicks = []
-        for (i, (title, on_click)) in enumerate(buttons):
+        for i, (title, on_click) in enumerate(buttons):
             # strip title to fit in the width
             width = self._widths[i]
             title = title[: width - 2]

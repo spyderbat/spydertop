@@ -44,7 +44,7 @@ from spydertop.constants.columns import (
     Column,
 )
 from spydertop.model import AppModel
-from ..utils import is_event_in_widget
+from spydertop.utils import is_event_in_widget
 
 # the following are a set of functions that are used to fill in the options
 # some of these are only necessary due to python's lambda behavior
@@ -87,7 +87,7 @@ def get_enabled(columns: List[Column], index: int):
 
 def collapse_tree(val, model):
     """Create a lambda to set the collapse tree value"""
-    model.config["collapse_tree"] = val
+    model.settings.collapse_tree = val
     model.rebuild_tree()
 
 
@@ -155,52 +155,52 @@ OPTIONS = {
         "Settings": [
             (
                 "Hide Threads",
-                (True, lambda model: model.config["hide_threads"]),
+                (True, lambda model: model.settings.hide_threads),
                 set_config("hide_threads"),
             ),
             (
                 "Hide Kernel Threads",
-                (True, lambda model: model.config["hide_kthreads"]),
+                (True, lambda model: model.settings.hide_kthreads),
                 set_config("hide_kthreads"),
             ),
             (
                 "Sort Ascending",
-                (True, lambda model: model.config["sort_ascending"]),
+                (True, lambda model: model.state.sort_ascending),
                 set_config("sort_ascending"),
             ),
             (
                 "Cursor Follows Record",
-                (False, lambda model: model.config["follow_record"]),
+                (False, lambda model: model.settings.follow_record),
                 set_config("follow_record"),
             ),
             (
                 "Use UTC Time",
-                (False, lambda model: model.config["utc_time"]),
+                (False, lambda model: model.settings.utc_time),
                 set_config("utc_time"),
             ),
             (
                 "Play",
-                (False, lambda model: model.config["play"]),
+                (False, lambda model: model.settings.play),
                 set_config("play"),
             ),
             (
                 "Play Speed",
-                (1.0, lambda model: model.config["play_speed"]),
+                (1.0, lambda model: model.settings.play_speed),
                 set_config("play_speed"),
             ),
             (
                 "Tree",
-                (False, lambda model: model.config["tree"]),
+                (False, lambda model: model.settings.tree),
                 set_config("tree"),
             ),
             (
                 "Collapse All",
-                (False, lambda model: model.config["collapse_tree"]),
+                (False, lambda model: model.settings.collapse_tree),
                 collapse_tree,
             ),
             (
                 "Filter",
-                ("", lambda model: model.config["filter"]),
+                ("", lambda model: model.state.filter),
                 set_config("filter"),
             ),
         ],
@@ -209,7 +209,7 @@ OPTIONS = {
                 "Select Color Scheme:",
                 (
                     {"htop", "spyderbat", "monochrome", "green", "bright", "tlj256"},
-                    lambda model: model.config["theme"],
+                    lambda model: model.settings.theme,
                 ),
                 set_config("theme"),
             ),
@@ -267,7 +267,7 @@ class SetupFrame(Frame):
 
         self._main_column.value = "Columns"
 
-        self.set_theme(self._model.config["theme"])
+        self.set_theme(self._model.settings.theme)
 
         self.rebuild()
 
@@ -290,8 +290,8 @@ class SetupFrame(Frame):
                     self._on_death()
 
         super().process_event(event)
-        if self._model.config.settings_changed:
-            self.set_theme(self._model.config["theme"])
+        if self._model.settings.theme != self._theme:
+            self.set_theme(self._model.settings.theme)
 
     def make_widget(self, row):
         """Construct a widget for the given row based on its type."""

@@ -10,13 +10,31 @@ Various utilities for spydertop
 """
 
 from datetime import datetime, timezone
+import os
+from pathlib import Path
 import re
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+    TYPE_CHECKING,
+)
 
 from asciimatics.widgets.utilities import THEMES
-from spydertop.constants import COLOR_REGEX
 
+from spydertop.constants import COLOR_REGEX
 from spydertop.utils.types import Alignment, DelayedLog, Record
+
+if TYPE_CHECKING:
+    from spydertop.config.config import Settings
+else:
+    Settings = Any
 
 global log  # pylint: disable=global-at-module-level,invalid-name
 # the global log object, used everywhere
@@ -109,7 +127,7 @@ def header_bytes(n_bytes: int) -> str:
 
 def add_palette(text, model, **kwargs) -> str:
     """formats the text with a few keys from the palette"""
-    palette = THEMES[model.config["theme"]]
+    palette = THEMES[model.settings.theme]
     # this is necessary because the palette may be a defaultdict
     concrete_palette = {
         "background": palette["background"][0],
@@ -122,11 +140,9 @@ def add_palette(text, model, **kwargs) -> str:
     return text.format(**concrete_palette, **kwargs)
 
 
-def get_timezone(model):
+def get_timezone(settings: Settings):
     """Get the timezone based on the config"""
-    return (
-        timezone.utc if model.config["utc_time"] else datetime.now().astimezone().tzinfo
-    )
+    return timezone.utc if settings.utc_time else datetime.now().astimezone().tzinfo
 
 
 def is_event_in_widget(event, widget):
@@ -223,7 +239,7 @@ def align_with_overflow(
 
 def get_machine_short_name(machine: Record) -> str:
     """Get a short name for a machine"""
-    if machine["cloud_tags"] and "Name" in machine["cloud_tags"]:
+    if "cloud_tags" in machine and "Name" in machine["cloud_tags"]:
         if "k8s" in "".join(list(machine["cloud_tags"].keys())):
             return "node:" + machine["hostname"]
         return machine["cloud_tags"]["Name"]
@@ -233,3 +249,14 @@ def get_machine_short_name(machine: Record) -> str:
 def obscure_key(key: str) -> str:
     """Obscure a key by only showing the first and last 4 characters"""
     return key[:4] + "..." + key[-4:]
+
+
+def is_docker():
+    """Determine if we are running in a docker container"""
+    # https://stackoverflow.com/a/48710609/1072212
+    cgroup = Path("/proc/self/cgroup")
+    return (
+        Path("/.dockerenv").is_file()
+        or cgroup.is_file()
+        and "docker" in cgroup.read_text("utf-8")
+    )
