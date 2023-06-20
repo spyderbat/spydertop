@@ -49,18 +49,6 @@ from spydertop.utils import (
 from spydertop.constants import API_LOG_TYPES, COLOR_REGEX
 from spydertop.widgets.table import Table
 
-# minimal information needed for a full configuration:
-# - api key
-# - organization
-# - source
-# - time range
-# This will then be rearranged to fit the config:
-# - if the config has no contexts, create one called "default"
-# - if the config has no active context, set the active context to "default"
-# - if the config has no secrets, create one with the api key and the default API url
-# - config settings stay as they are
-# - the start time is the given time, the start duration is default 15 minutes
-
 
 @dataclass
 class ConfigState:  # pylint: disable=too-many-instance-attributes

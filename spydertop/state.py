@@ -54,22 +54,3 @@ class State:  # pylint: disable=too-many-instance-attributes
             return self._internal_state[key]
         self._internal_state[key] = value
         return self._internal_state[key]
-
-    #     def set_state(**kwargs):
-    #         val = self._internal_state[key]
-    #         for key2, value2 in kwargs.items():
-    #             setattr(val, key2, value2)
-    #         self._internal_state[key] = val
-    #
-    #     return (
-    #         value,
-    #         set_state,
-    #     )
-    # #
-    # def can_load_from_api(self) -> bool:
-    #     """Returns whether the model can successfully load from the API with the current state"""
-    #     return (
-    #         self.org_uid is not None
-    #         and self.source_uid is not None
-    #         and self.time is not None
-    #     )
