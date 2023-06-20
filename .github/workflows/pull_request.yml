@@ -30,13 +30,7 @@ jobs:
           pip install --upgrade pip
           pip install pylint .
       - 
-        name: Run Lint (3.11)
-        if: matrix.python-version == '3.11'
-        run: |
-          pylint spydertop
-      - 
-        name: Run Lint (3.7)
-        if: matrix.python-version == '3.7'
+        name: Run Lint
         run: |
           pylint spydertop
       - 

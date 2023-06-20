@@ -47,7 +47,7 @@ def get_user_cache() -> Dict[str, Any]:
     """Get the user cache"""
     cache_file = Path(DIRS.user_cache_dir) / "user_cache.yaml"
     if cache_file.exists():
-        cache = yaml.safe_load(cache_file.read_text())
+        cache = yaml.safe_load(cache_file.read_text(encoding="utf-8"))
     else:
         cache = {}
     return cache
@@ -60,7 +60,7 @@ def set_user_cache(key: str, value: Any):
     cache = get_user_cache()
     cache[key] = value
     cache_file = Path(DIRS.user_cache_dir) / "user_cache.yaml"
-    cache_file.write_text(yaml.safe_dump(cache))
+    cache_file.write_text(yaml.safe_dump(cache), encoding="utf-8")
 
 
 def _cache_get(key: str, timeout: timedelta):
