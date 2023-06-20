@@ -132,7 +132,9 @@ class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
         # set up information that is already in config or args
         if self.config.active_context is not None:
-            secret = self.config.contexts[self.config.active_context].get_secret()
+            secret = self.config.contexts[self.config.active_context].get_secret(
+                config.directory
+            )
             if secret is not None:
                 self.set_api_key(secret.api_key, secret.api_url)
                 self.cache.has_account = True
@@ -165,15 +167,6 @@ class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self.set_theme(self.config.settings.theme)
 
     def update(self, frame_no):
-        # if (
-        #     not self._needs_build
-        #     and self.recordpool is not None
-        #     and self.recordpool.loaded
-        # ):
-        #     # we have returned from Main, reset state
-        #     self._needs_build = True
-        #     self.recordpool.clear()
-
         if self._needs_build:
             if self.thread:
                 self.thread.join()
@@ -263,11 +256,11 @@ class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
                 )
             # update the configuration if the user does not have one complete
             if len(self.config.contexts) == 0:
-                secrets = Secret.get_secrets()
+                secrets = Secret.get_secrets(self.config.directory)
                 if not self.cache.api_key in [s.api_key for s in secrets.values()]:
                     assert isinstance(self.recordpool.input_, Secret)
                     secrets["default"] = self.recordpool.input_
-                    Secret.set_secrets(secrets)
+                    Secret.set_secrets(self.config.directory, secrets)
 
                 self.config.contexts["default"] = Context(
                     secret_name="default",
@@ -325,6 +318,7 @@ $ spydertop -i examples/minikube-sock-shop.json.gz
             if len(self.recordpool.orgs) == 0:
                 self.load_data("orgs")
                 self.build_loading("Loading organizations...")
+                return
 
             # if there are orgs, determine how many, and pick one
             if len(self.recordpool.orgs) == 1:
@@ -551,8 +545,11 @@ Once you have a source configured, you can continue.\
         list_box = Table(self.state, self.config.settings, None, "selection")
         list_box.header_enabled = False
         list_box.value = index
-        list_box.columns = columns
-        list_box.set_rows(answers, answers)
+        list_box.columns = [Column("ID", 0, int, enabled=False)] + columns
+        list_box.set_rows(
+            [[str(i)] + row for i, row in enumerate(answers)],
+            [[i] + row for i, row in enumerate(answers)],
+        )
         text_input = None
 
         def on_search():
@@ -569,7 +566,7 @@ Once you have a source configured, you can continue.\
             if list_box.value is not None:
                 self.state.filter = ""
                 row = list_box.get_selected()
-                callback([str(v) for v in row[1]] if row is not None else None)
+                callback([str(v) for v in row[1][1:]] if row is not None else None)
             else:
                 self.cache.notification = "No option was selected, please select one"
                 self._needs_build = True

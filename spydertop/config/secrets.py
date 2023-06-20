@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Dict
 
 import yaml
-from spydertop.config import DIRS, DEFAULT_API_URL
+from spydertop.config import DEFAULT_API_URL
 
 from spydertop.utils import obscure_key
 
@@ -37,21 +37,20 @@ class Secret:
         return data
 
     @staticmethod
-    def _get_secrets_file() -> Path:
-        config_dir = Path(DIRS.user_config_dir)
+    def _get_secrets_file(config_dir: Path) -> Path:
         secret_file = config_dir / ".secrets"
 
         return secret_file
 
     @staticmethod
     @lru_cache(maxsize=1)
-    def get_secrets() -> Dict[str, "Secret"]:
+    def get_secrets(config_dir: Path) -> Dict[str, "Secret"]:
         """
         Returns the secrets in the config directory.
         Secrets are lru_cached the first time they are read. This means that if the
         secrets file is updated, spydertop will need to be restarted.
         """
-        secret_file = Secret._get_secrets_file()
+        secret_file = Secret._get_secrets_file(config_dir)
 
         if not secret_file.exists():
             return {}
@@ -65,9 +64,9 @@ class Secret:
         }
 
     @staticmethod
-    def set_secrets(secrets: Dict[str, "Secret"]):
+    def set_secrets(config_dir: Path, secrets: Dict[str, "Secret"]):
         """Sets the secrets in the config file"""
-        secret_file = Secret._get_secrets_file()
+        secret_file = Secret._get_secrets_file(config_dir)
 
         secrets_as_json = {name: asdict(secret) for name, secret in secrets.items()}
 

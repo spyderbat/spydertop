@@ -119,7 +119,7 @@ class SecretsParam(click.ParamType):
     name = "Secrets"
 
     def shell_complete(self, ctx, param, incomplete):
-        secrets = Secret.get_secrets()
+        secrets = Secret.get_secrets(Path(DIRS.user_config_dir))
         secret_names = list(secrets.keys())
         secret_names.sort()
         return [
@@ -201,7 +201,11 @@ See --help for a list of valid log levels."
     if not config_dir.exists() and config_dir != Path(DIRS.user_config_dir):
         click.echo(f"Error loading config file: {config_dir} does not exist")
         ctx.exit(1)
-    config_obj = Config.load_from_directory(config_dir)
+    try:
+        config_obj = Config.load_from_directory(config_dir)
+    except ConfigError as exc:
+        click.echo(f"Error loading config file: {exc}")
+        ctx.exit(1)
     ctx.obj = {
         "config": config_obj,
     }
@@ -372,7 +376,6 @@ def get_context(ctx: click.Context, name: Optional[str] = None):
     "-g",
     type=str,
     help="Name or ID of the organization to pull data from",
-    required=True,
 )
 @click.option(
     "--focus",
@@ -461,15 +464,20 @@ def delete_context(ctx: click.Context, name: str):
     help="URL target for api queries.",
     default=DEFAULT_API_URL,
 )
+@click.pass_context
 def set_api_secret(
-    api_key: str, api_url: Optional[str] = None, name: Optional[str] = None
+    ctx: click.Context,
+    api_key: str,
+    api_url: Optional[str] = None,
+    name: Optional[str] = None,
 ):
     """
     Create or update a secret for accessing the API.
     """
     if not name:
         name = "default"
-    secrets = Secret.get_secrets()
+    config_dir = get_config_from_ctx(ctx).directory
+    secrets = Secret.get_secrets(config_dir)
     if name in secrets:
         click.confirm(
             f"Secret {name} already exists. Are you sure you want to overwrite it?",
@@ -481,14 +489,16 @@ def set_api_secret(
 
     secrets[name] = Secret(api_key) if api_url is None else Secret(api_key, api_url)
 
-    Secret.set_secrets(secrets)
+    Secret.set_secrets(config_dir, secrets)
 
 
 @config.command("get-secret")
 @click.argument("name", required=False, type=SecretsParam())
-def get_api_secret(name=None):
+@click.pass_context
+def get_api_secret(ctx: click.Context, name=None):
     """Describe one or many api secrets."""
-    secrets = Secret.get_secrets()
+    config_dir = get_config_from_ctx(ctx).directory
+    secrets = Secret.get_secrets(config_dir)
     if name:
         secrets = {name: secrets[name].as_dict()}
     else:
@@ -499,14 +509,16 @@ def get_api_secret(name=None):
 
 @config.command("delete-secret")
 @click.argument("name", required=True, type=SecretsParam())
-def delete_api_secret(name=None):
+@click.pass_context
+def delete_api_secret(ctx: click.Context, name=None):
     """Delete an api secret"""
     assert name is not None
-    secrets = Secret.get_secrets()
+    config_dir = get_config_from_ctx(ctx).directory
+    secrets = Secret.get_secrets(config_dir)
     if name not in secrets:
         click.echo(f"Secret {name} does not exist.")
         return
     click.confirm(f"Are you sure you want to delete secret {name}?", abort=True)
 
     del secrets[name]
-    Secret.set_secrets(secrets)
+    Secret.set_secrets(config_dir, secrets)

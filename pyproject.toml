@@ -50,4 +50,4 @@ Spyderbat = "https://www.spyderbat.com/"
 Docker = "https://hub.docker.com/r/spyderbat/spydertop"
 
 [project.scripts]
-spydertop = "spydertop:cli.cli"
+spydertop = "spydertop:cli"

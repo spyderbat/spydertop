@@ -21,7 +21,7 @@ import urllib3
 
 from spydertop.config import DEFAULT_API_URL
 from spydertop.config.cache import set_user_cache
-from spydertop.config.config import Context, Settings
+from spydertop.config.config import Settings
 from spydertop.config.secrets import Secret
 from spydertop.recordpool import RecordPool
 from spydertop.state import State
@@ -48,7 +48,6 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
     failed: bool = False
     failure_reason: str = ""
     settings: Settings
-    context: Optional[Context] = None
     state: State
     columns_changed: bool = False
     thread: Optional[threading.Thread] = None
@@ -307,7 +306,7 @@ not enough information could be loaded.\
         new_data = {
             "name": name,
             "application": "spydertop",
-            "orgId": self.context.org_uid if self.context is not None else None,
+            "orgId": self.state.org_uid,
             "session_id": self._session_id,
             **data,
         }
@@ -318,10 +317,8 @@ not enough information could be loaded.\
             headers = {
                 "Content-Type": "application/json",
             }
-            if self.context is not None:
-                secret = self.context.get_secret()
-                if secret is not None:
-                    headers["Authorization"] = f"Bearer {secret.api_key}"
+            if isinstance(self._record_pool.input_, Secret):
+                headers["Authorization"] = f"Bearer {self._record_pool.input_.api_key}"
             # send the data to the API
             response = self._http_client.request(
                 "POST",

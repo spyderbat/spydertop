@@ -69,9 +69,9 @@ class Context:
             "focus": [asdict(f) for f in self.focus],
         }
 
-    def get_secret(self) -> Optional[Secret]:
+    def get_secret(self, config_dir: Path) -> Optional[Secret]:
         """Returns the secret that this context uses"""
-        return Secret.get_secrets().get(self.secret_name, None)
+        return Secret.get_secrets(config_dir).get(self.secret_name, None)
 
 
 @dataclass
@@ -123,6 +123,7 @@ class Config:
                 contexts={},
                 settings=Settings(),
                 active_context=None,
+                directory=config_dir,
             )
         data = yaml.safe_load(file.read_text())
         try:

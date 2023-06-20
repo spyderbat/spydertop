@@ -13,9 +13,8 @@ the start_screen function, which initiates the main portion of the application
 from datetime import timedelta
 from os import environ
 import os
-from pathlib import Path
 import sys
-from typing import Callable, List, Optional, TextIO, Union
+from typing import Callable, List
 from asciimatics.screen import ManagedScreen, Screen
 from asciimatics.scene import Scene
 from asciimatics.exceptions import ResizeScreenError
@@ -112,7 +111,7 @@ def start_config_wizard(
         if config.active_context is None:
             log.err("No context selected, exiting")
             sys.exit(1)
-        secret = config.contexts[config.active_context].get_secret()
+        secret = config.contexts[config.active_context].get_secret(config.directory)
         if secret is None:
             log.err(
                 "Failed to get secret "
