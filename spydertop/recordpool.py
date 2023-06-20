@@ -62,7 +62,7 @@ class RecordPool:
         if isinstance(self.input_, Secret) and self._connection_pool is None:
             self._connection_pool = urllib3.PoolManager()
 
-    def load_api( # pylint: disable=too-many-arguments
+    def load_api(  # pylint: disable=too-many-arguments
         self,
         org_uid: str,
         source_uid: str,
@@ -228,7 +228,7 @@ No more records can be loaded."
             method="GET",
             url="/api/v1/org/",
             enable_cache=True,
-            timeout=(timedelta(minutes=0) if force_reload else timedelta(hours=1)),
+            timeout=(timedelta(minutes=0) if force_reload else timedelta(hours=6)),
         )
         orgs = orjson.loads(orgs)
         self.orgs = orgs
@@ -257,7 +257,7 @@ No more records can be loaded."
             method="GET",
             url=f"/api/v1/org/{org_uid}/source/",
             enable_cache=True,
-            timeout=(timedelta(minutes=0) if force_reload else timedelta(minutes=15)),
+            timeout=(timedelta(minutes=0) if force_reload else timedelta(hours=1)),
             **kwargs,
         )
         sources: List = orjson.loads(raw_sources)
@@ -271,7 +271,7 @@ No more records can be loaded."
             "GET",
             f"/api/v1/org/{org_uid}/cluster/",
             enable_cache=True,
-            timeout=(timedelta(minutes=0) if force_reload else timedelta(minutes=15)),
+            timeout=(timedelta(minutes=0) if force_reload else timedelta(hours=1)),
         )
         # parse the response
         self.clusters[org_uid] = orjson.loads(response)

@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 import gzip
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TextIO
 
 import click
 from click.shell_completion import CompletionItem
@@ -30,10 +30,10 @@ from spydertop.config.config import (
     Focus,
 )
 from spydertop.screens import start_screen
-from spydertop.state import State
 
 # from spydertop.screens import start_screen
 from spydertop.utils import convert_to_seconds, log
+from spydertop.utils.types import LoadArgs
 
 
 class Timestamp(click.ParamType):
@@ -61,7 +61,7 @@ class Timestamp(click.ParamType):
             return None
         parsed_date = dateparser.parse(value)
         if parsed_date:
-            return parsed_date.timestamp()
+            return parsed_date
         return self.fail(
             f"{value} is not a valid timestamp. "
             "Please use a valid timestamp or a relative time.",
@@ -98,7 +98,7 @@ class Duration(click.ParamType):
             return None
         try:
             timestamp = convert_to_seconds(value)
-            return timestamp
+            return timedelta(seconds=timestamp)
         except ValueError as exc:
             return self.fail(f"Unable to convert input into duration: {value} {exc}")
 
@@ -165,13 +165,37 @@ CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
     default=Path(DIRS.user_config_dir),
     help=f"The configuration file to use. Defaults to {DEFAULT_CONFIG_PATH}",
 )
+@click.option(
+    "--log-level",
+    type=str,
+    default="WARN",
+    help="What level of verbosity in logs, one of TRACEBACK, DEBUG, INFO, WARN, ERROR. If a + is \
+appended to the log level, extended logging and saving to a file will be enabled. \
+Defaults to WARN",
+    envvar="SPYDERTOP_LOG_LEVEL",
+)
 @click.pass_context
-def cli(ctx: click.Context, config_dir: Path):
+def cli(ctx: click.Context, config_dir: Path, log_level: str):
     """
     Spydertop - Historical TOP Tool
 
     Run 'spydertop COMMAND --help' for more information on a command.
     """
+    # allow for logging from the underlying library
+    # and saving to a file if it is requested
+    if log_level.endswith("+"):
+        log_level = log_level[:-1]
+        log.log_level = logging.getLevelName(log_level)
+        log.initialize_development_logging()
+    else:
+        log.log_level = logging.getLevelName(log_level)
+
+    if isinstance(log.log_level, str):
+        log.log_level = logging.WARN
+        log.warn(
+            "Invalid log level specified, defaulting to WARN. \
+See --help for a list of valid log levels."
+        )
 
     # Load the config file
     if not config_dir.exists() and config_dir != Path(DIRS.user_config_dir):
@@ -180,7 +204,6 @@ def cli(ctx: click.Context, config_dir: Path):
     config_obj = Config.load_from_directory(config_dir)
     ctx.obj = {
         "config": config_obj,
-        "config_dir": config_dir,
     }
 
 
@@ -208,7 +231,6 @@ Defaults to the values set in your spyderbat_api config",
 @click.option(
     "--duration",
     "-d",
-    default=900,
     type=Duration(),
     help="What period of time records should be pre-fetched for playback in seconds. \
 Defaults to 15 minutes",
@@ -227,26 +249,16 @@ fetching records from the production Spyderbat API",
     type=click.File("w"),
     help="If set, spydertop with use the specified output file to save the loaded records",
 )
-@click.option(
-    "--log-level",
-    type=str,
-    default="WARN",
-    help="What level of verbosity in logs, one of TRACEBACK, DEBUG, INFO, WARN, ERROR. If a + is \
-appended to the log level, extended logging and saving to a file will be enabled. \
-Defaults to WARN",
-    envvar="SPYDERTOP_LOG_LEVEL",
-)
 @click.argument("timestamp", type=Timestamp(), required=False)
 @click.pass_context
 def load(  # pylint: disable=too-many-arguments
-    ctx,
-    organization,
-    machine,
-    input_file,
-    output,
-    timestamp,
-    duration,
-    log_level,
+    ctx: click.Context,
+    organization: Optional[str],
+    machine: Optional[str],
+    input_file: Optional[TextIO],
+    output: Optional[TextIO],
+    timestamp: Optional[datetime],
+    duration: Optional[timedelta],
 ):
     """
     Fetches data and starts the TUI.
@@ -274,33 +286,18 @@ def load(  # pylint: disable=too-many-arguments
             raise click.BadParameter(
                 "Input file must be a text gzip file, not a binary gzip file"
             )
-    if input_file is None:
-        input_file = DEFAULT_API_URL
 
-    state = State(
-        time=datetime.fromtimestamp(timestamp) if timestamp else None,
-        start_duration=timedelta(seconds=duration),
-        org_uid=organization,
-        source_uid=machine,
+    args = LoadArgs(
+        organization=organization,
+        source=machine,
+        duration=duration,
+        input=input_file,
+        output=output,
+        timestamp=timestamp,
     )
 
-    # allow for logging from the underlying library
-    # and saving to a file if it is requested
-    if log_level.endswith("+"):
-        log_level = log_level[:-1]
-        log.log_level = logging.getLevelName(log_level)
-        log.initialize_development_logging()
-    else:
-        log.log_level = logging.getLevelName(log_level)
-
-    if isinstance(log.log_level, str):
-        log.log_level = logging.WARN
-        log.warn(
-            "Invalid log level specified, defaulting to WARN. \
-See --help for a list of valid log levels."
-        )
-
-    start_screen(ctx.obj["config"], ctx.obj["config_dir"], state, input_file, output)
+    start_screen(ctx.obj["config"], args)
+    log.dump()
 
 
 @cli.group()
@@ -333,6 +330,7 @@ def get_config(ctx: click.Context):
     """
     inner_config = get_config_from_ctx(ctx)
 
+    click.echo(f"The current configuration is located at {inner_config.directory}\n")
     click.echo(yaml.dump(inner_config.as_dict()))
 
 
@@ -341,7 +339,7 @@ def get_config(ctx: click.Context):
 @click.pass_context
 def get_context(ctx: click.Context, name: Optional[str] = None):
     """
-    Gets the currently loaded configuration
+    Shows a specific context, or all contexts if no name is specified
     """
     inner_config = get_config_from_ctx(ctx)
     if name is not None:
@@ -386,7 +384,6 @@ def get_context(ctx: click.Context, name: Optional[str] = None):
     "--source",
     type=str,
     help="ID of the machine or cluster to load",
-    # required=True,  # TODO: add automatic source determining
 )
 @click.pass_context
 def set_context(  # pylint: disable=too-many-arguments
@@ -406,7 +403,7 @@ def set_context(  # pylint: disable=too-many-arguments
     else:
         focuses = []
     inner_config.contexts[name] = Context(secret, organization, source, focuses)
-    inner_config.save_to_directory(ctx.obj["config_dir"])
+    inner_config.save()
 
 
 @config.command()
@@ -421,7 +418,7 @@ def use_context(ctx: click.Context, name: str):
         click.echo(f"Context {name} does not exist.")
         return
     inner_config.active_context = name
-    inner_config.save_to_directory(ctx.obj["config_dir"])
+    inner_config.save()
 
 
 @config.command()
@@ -437,7 +434,7 @@ def delete_context(ctx: click.Context, name: str):
         return
     click.confirm(f"Are you sure you want to delete context {name}?", abort=True)
     del inner_config.contexts[name]
-    inner_config.save_to_directory(ctx.obj["config_dir"])
+    inner_config.save()
 
 
 @config.command("set-secret")

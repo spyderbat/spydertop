@@ -73,7 +73,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         )
 
         self._app_state = state
-        self._state, self._set_state = state.use_state(name, TableState())
+        self._state = state.use_state(name, TableState())
         self._parser = parser
         self._settings = settings
         self.tree = tree
@@ -92,7 +92,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
             if len(self._filtered_rows) > 0 and 0 <= self.value < len(
                 self._filtered_rows
             ):
-                self._set_state(id_to_follow=self._filtered_rows[self.value][1][0])
+                self._state.id_to_follow = self._filtered_rows[self.value][1][0]
 
         # validate the selected row
         if (
@@ -526,6 +526,6 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         value = max(value, 0)
         if value >= len(self._filtered_rows):
             value = len(self._filtered_rows) - 1
-        self._set_state(selected_row=value)
-        self._set_state(id_to_follow=self._filtered_rows[value][1][0])
+        self._state.selected_row = value
+        self._state.id_to_follow = self._filtered_rows[value][1][0]
         self.fix_vert_offset()

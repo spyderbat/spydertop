@@ -16,6 +16,7 @@ from asciimatics.exceptions import NextScene, StopApplication
 from asciimatics.event import KeyboardEvent
 
 from spydertop.model import AppModel
+from spydertop.state import ExitReason
 from spydertop.utils.types import Alignment, ExtendedParser
 from spydertop.widgets import Padding, FuncLabel
 
@@ -110,6 +111,6 @@ class FailureFrame(Frame):
         self._model.recover(action)
         raise NextScene("Main")
 
-    @staticmethod
-    def _quit():
+    def _quit(self):
+        self._model.state.exit_reason = ExitReason.QUIT
         raise StopApplication("User quit after failure")

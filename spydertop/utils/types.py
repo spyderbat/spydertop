@@ -10,12 +10,13 @@ Custom or modified types for use in the application.
 """
 
 import bisect
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import Enum
 import re
 from textwrap import TextWrapper
 import traceback
-from typing import Dict, List, NewType, Optional, Tuple, Union, Any
+from typing import Dict, List, NewType, Optional, TextIO, Tuple, Union, Any
 import logging
 
 import click
@@ -27,6 +28,18 @@ from spydertop.constants import COLOR_REGEX
 Tree = NewType("Tree", Dict[str, Optional[Tuple[bool, "Tree"]]])
 RecordInternal = NewType("RecordInternal", Any)
 Record = NewType("Record", Dict[str, RecordInternal])
+
+
+@dataclass
+class LoadArgs:
+    """A container for the arguments passed to the load function"""
+
+    organization: Optional[str]
+    source: Optional[str]
+    duration: Optional[timedelta]
+    input: Optional[TextIO]
+    output: Optional[TextIO]
+    timestamp: Optional[datetime]
 
 
 class APIError(Exception):
@@ -126,6 +139,7 @@ class Status(Enum):
     WAKE_KILL = "K"
     WAKING = "W"
     PARKED = "P"
+    IDLE = "I"
     UNKNOWN = "?"
 
     def __lt__(self, other: "Status") -> bool:

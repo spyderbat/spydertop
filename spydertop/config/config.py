@@ -90,6 +90,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     follow_record: bool = False
     utc_time: bool = False
     tab: str = "processes"
+    default_duration_minutes: int = 15
 
 
 class ConfigError(Exception):
@@ -110,6 +111,8 @@ class Config:
     contexts: Dict[str, Context]
     active_context: Optional[str]
     settings: Settings
+
+    directory: Path = field(default=Path(DIRS.user_config_dir), repr=False)
 
     @staticmethod
     def load_from_directory(config_dir: Path):
@@ -135,18 +138,25 @@ class Config:
                 contexts=contexts,
                 settings=settings,
                 active_context=data["active_context"],
+                directory=config_dir,
             )
         except KeyError as exc:
             raise ConfigError(f"Failed to load config, missing key: {exc}") from exc
+
+    def save(self):
+        """Saves the config to the default location"""
+        self.save_to_directory(self.directory)
 
     def save_to_directory(self, config_dir: Path):
         """Saves the default config"""
         config_path = config_dir / "config.yaml"
         config_path.write_text(yaml.dump(self.as_dict()))
 
-    def as_dict(self):
+    def as_dict(self) -> dict:
         """Returns the config as a dictionary"""
-        return {
+        data = {
             **asdict(self),
             "contexts": {name: ctx.as_dict() for name, ctx in self.contexts.items()},
         }
+        del data["directory"]
+        return data

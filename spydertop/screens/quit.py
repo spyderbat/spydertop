@@ -17,6 +17,7 @@ from asciimatics.exceptions import StopApplication
 from spydertop.config.cache import get_user_cache
 
 from spydertop.model import AppModel
+from spydertop.state import ExitReason
 from spydertop.utils import is_docker
 from spydertop.widgets import FuncLabel, Padding
 from spydertop.utils.types import ExtendedParser
@@ -65,6 +66,7 @@ class QuitFrame(Frame):
             get_user_cache().get("has_submitted_feedback", False)
             and self._state["enjoyed_spydertop"] is None
         ) or is_docker():
+            self._model.state.exit_reason = ExitReason.QUIT
             raise StopApplication("User Quit and does not need feedback")
 
         self._single_column.add_widget(
@@ -133,8 +135,10 @@ later through the Support and Feedback menu on the help screen.
         )
 
     def _quit(self):
+        self._model.state.exit_reason = ExitReason.QUIT
         raise StopApplication("User Quit without submitting feedback")
 
     def _submit_feedback(self):
+        self._model.state.exit_reason = ExitReason.QUIT
         self._model.submit_feedback(self._state["feedback_text"])
         raise StopApplication("User Quit after submitting feedback")

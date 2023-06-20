@@ -107,11 +107,9 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
         """Load data from the source, either the API or a file, then process it"""
         try:
             if isinstance(self._record_pool.input_, Secret):
-                if not self.state.can_load_from_api() or timestamp is None:
+                if timestamp is None or self.state.source_uid is None:
                     raise RuntimeError("Not enough information to load data from API")
-                assert (
-                    self.state.org_uid is not None and self.state.source_uid is not None
-                )
+
                 self._record_pool.load_api(
                     self.state.org_uid,
                     self.state.source_uid,
@@ -250,7 +248,7 @@ not enough information could be loaded.\
                 log.traceback(exc)
         return self._record_pool.orgs
 
-    def get_sources( # pylint: disable=too-many-arguments
+    def get_sources(  # pylint: disable=too-many-arguments
         self,
         org_uid: str,
         page: Optional[int] = None,
@@ -301,10 +299,11 @@ not enough information could be loaded.\
 
     def log_api(self, name: str, data: Dict[str, Any]) -> None:
         """Send logs to the spyderbat internal logging API"""
-        if not isinstance(self._record_pool.input_, str):
+        if not self.is_loading_from_api():
             url = DEFAULT_API_URL
         else:
-            url = self._record_pool.input_
+            assert isinstance(self._record_pool.input_, Secret)
+            url = self._record_pool.input_.api_url
         new_data = {
             "name": name,
             "application": "spydertop",
@@ -555,8 +554,12 @@ not enough information could be loaded.\
     def is_loaded(self, timestamp: float) -> bool:
         """Return whether the model has loaded data for the given time"""
         return self._record_pool.is_loaded(timestamp) or not isinstance(
-            self._record_pool.input_, str
+            self._record_pool.input_, Secret
         )
+
+    def is_loading_from_api(self) -> bool:
+        """Return whether the model is currently loading data from the API"""
+        return isinstance(self._record_pool.input_, Secret)
 
     def get_record_by_id(self, record_id: str) -> Optional[Record]:
         """Get a record from the record pool by its ID"""
@@ -568,7 +571,10 @@ not enough information could be loaded.\
     @property
     def loaded(self) -> bool:
         """Return whether the model has loaded data"""
-        return self._record_pool.loaded
+        if not self._record_pool.loaded or self.timestamp is None:
+            return False
+
+        return self.is_loaded(self.timestamp)
 
     @property
     def progress(self) -> float:

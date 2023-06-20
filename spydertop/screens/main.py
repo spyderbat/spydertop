@@ -17,7 +17,7 @@ import urllib.parse
 import webbrowser
 
 import pyperclip
-from asciimatics.screen import Screen
+from asciimatics.screen import Screen, StopApplication
 from asciimatics.widgets import (
     Frame,
     Layout,
@@ -42,6 +42,7 @@ from spydertop.screens.meters import (
     show_uptime,
 )
 from spydertop.screens.modals import InputModal, NotificationModal
+from spydertop.state import ExitReason
 from spydertop.widgets import Table
 from spydertop.utils import (
     align_with_overflow,
@@ -90,6 +91,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     _footer: Footer
     _cpus: Dict[str, List[Meter]] = {}
     _tabs: List[Button] = []
+    _tabs_layout: Layout
     _memory: Meter
     _swap: Meter
     _columns: Table
@@ -107,6 +109,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         )
         self._model = model
         self._old_settings = deepcopy(model.settings)
+        self._old_state = deepcopy(model.state)
 
         self.set_theme(model.settings.theme)
 
@@ -225,41 +228,12 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         header.add_widget(Padding(), 1)
 
         ################# Main Table Tabs #######################
-        available_tabs = [
-            "Processes",
-            "Flags",
-            "Sessions",
-            "Connections",
-            "Listening",
-            "Containers",
-        ]
-        for tab in available_tabs.copy():
-            # if there are no records for the tab, don't add it
-            if len(getattr(self._model, tab.lower())) == 0:
-                available_tabs.remove(tab)
-
-        tabs_layout = Layout(
+        available_tabs = self._get_available_tabs()
+        self._tabs_layout = Layout(
             calculate_widths(self.screen.width, [1] * len(available_tabs))
         )
-        self._tabs = []
-        self.add_layout(tabs_layout)
-        for i, name in enumerate(available_tabs):
-
-            def wrapper(name):
-                def inner():
-                    self._switch_to_tab(name.lower())
-
-                return inner
-
-            button = Button(name, wrapper(name), add_box=False)
-            self._tabs.append(button)
-            tabs_layout.add_widget(button, i)
-
-        if self._model.settings.tab not in [t.lower() for t in available_tabs]:
-            if len(available_tabs) == 0:
-                self._model.fail("No records of were found.")
-                raise NextScene("Failure")
-            self._model.settings.tab = available_tabs[0].lower()
+        self.add_layout(self._tabs_layout)
+        self._init_tabs()
 
         ################# Main Table #######################
         self._main = Layout([1], fill_frame=True)
@@ -288,6 +262,47 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self.switch_focus(self._main, 0, 0)
         self._widgets_initialized = True
 
+    def _get_available_tabs(self):
+        available_tabs = [
+            "Processes",
+            "Flags",
+            "Sessions",
+            "Connections",
+            "Listening",
+            "Containers",
+        ]
+        for tab in available_tabs.copy():
+            # if there are no records for the tab, don't add it
+            if len(getattr(self._model, tab.lower())) == 0:
+                available_tabs.remove(tab)
+
+        return available_tabs
+
+    def _init_tabs(self):
+        available_tabs = self._get_available_tabs()
+        self._tabs = []
+        self._tabs_layout.clear_widgets()
+        for i, name in enumerate(available_tabs):
+
+            def wrapper(name):
+                def inner():
+                    self._switch_to_tab(name.lower())
+
+                return inner
+
+            button = Button(name, wrapper(name), add_box=False)
+            self._tabs.append(button)
+            self._tabs_layout.add_widget(button, i)
+
+        if self._model.settings.tab not in [t.lower() for t in available_tabs]:
+            if len(available_tabs) == 0:
+                self._model.fail("No records of were found.")
+                raise NextScene("Failure")
+            self._model.settings.tab = available_tabs[0].lower()
+        self._switch_to_tab(self._model.settings.tab, force=False)
+        self.reset()
+        self.fix()
+
     # -- overrides -- #
     def update(self, frame_no):  # pylint: disable=too-many-branches,too-many-statements
         settings = self._model.settings
@@ -302,6 +317,10 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             return
         if not self._widgets_initialized:
             self._init_widgets()
+
+        # ensure that the table is always in sync with the model
+        if self._columns.tree is not self._model.tree:
+            self._columns.tree = self._model.tree
 
         # update model (if needed, at most 4 times per second)
         if state.play and (frame_no % max(int(20 / settings.play_speed), 5) == 0):
@@ -350,10 +369,6 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             if settings.utc_time != self._old_settings.utc_time:
                 self.needs_recalculate = True
 
-            self._footer.change_button_text(
-                "Play" if self._model.state.play else "Pause",
-                "Play" if not self._model.state.play else "Pause",
-            )
             self.fix()
             self.needs_screen_refresh = True
             if (
@@ -361,7 +376,26 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
                 or settings.hide_kthreads != self._old_settings.hide_kthreads
             ) and self._model.settings.tab == "processes":
                 self.needs_recalculate = True
+            if settings.collapse_tree != self._old_settings.collapse_tree:
+                self._model.rebuild_tree()
+                self._columns.tree = self._model.tree
             self._old_settings = deepcopy(self._model.settings)
+
+        # detect changes in state
+        if self._old_state != state:
+            if state.play != self._old_state.play:
+                self._footer.change_button_text(
+                    "Play" if self._model.state.play else "Pause",
+                    "Play" if not self._model.state.play else "Pause",
+                )
+            if (
+                state.sort_ascending != self._old_state.sort_ascending
+                or state.sort_column != self._old_state.sort_column
+            ):
+                self.needs_recalculate = True
+            if state.filter != self._old_state.filter:
+                self.needs_update = True
+            self._old_state = deepcopy(state)
 
         # update columns if needed
         if self._model.columns_changed:
@@ -378,6 +412,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             # work up the caching system, updating each part of the cache
             # only if necessary
             if self.needs_recalculate:
+                self._init_tabs()
                 self._build_options(getattr(self._model, self._model.settings.tab))
                 self.needs_recalculate = False
                 self.needs_update = True
@@ -604,6 +639,10 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     def _switch_to_tab(self, tab_name: str, force: bool = False):
         """Switch to the given tab, and update the state accordingly"""
 
+        available_tabs = self._get_available_tabs()
+        if tab_name not in [s.lower() for s in available_tabs]:
+            return
+
         # update tabs colors
         for button in self._tabs:
             if "tab" in self.palette:
@@ -625,7 +664,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self._columns.value = 0
         self.needs_recalculate = True
         self._model.state.sort_column = None
-        self._model.state.filter = None
+        self._model.state.filter = ""
         self._cached_options = None
         self._cached_sortable = []
 
@@ -907,43 +946,39 @@ Some information displayed may not be accurate\
 
     def _config(self, name: str, value=None):
         """Change a config value, and handle any effects"""
-
-        value = (
-            value
-            or not getattr(self._model.state, name, None)
-            or getattr(self._model.settings, name)
-        )
         if hasattr(self._model.state, name):
-            setattr(self._model.state, name, value)
+            setattr(
+                self._model.state, name, value or not getattr(self._model.state, name)
+            )
         elif hasattr(self._model.settings, name):
-            setattr(self._model.settings, name, value)
-
-        if name == "collapse_tree":
-            self._model.rebuild_tree()
-            self._columns.tree = self._model.tree
+            setattr(
+                self._model.settings,
+                name,
+                value or not getattr(self._model.settings, name),
+            )
 
     # -- moving to other frames -- #
     def _back(self):
         """Move back to configuring sources"""
         # don't go back if the input is from a file
-        # TODO: re-enable this
-        # if not isinstance(self._model.config.input, str):
-        #     assert self.scene is not None, "A scene must be set in the frame before use"
-        #     self.scene.add_effect(
-        #         NotificationModal(
-        #             self.screen,
-        #             "There's no going back! Input is from a file.",
-        #             self,
-        #             frames=40,
-        #         )
-        #     )
-        #     return
+        if not self._model.is_loading_from_api():
+            assert self.scene is not None, "A scene must be set in the frame before use"
+            self.scene.add_effect(
+                NotificationModal(
+                    self.screen,
+                    "There's no going back! Input is from a file.",
+                    self,
+                    frames=40,
+                )
+            )
+            return
         self._model.log_api(API_LOG_TYPES["navigation"], {"button": "back"})
         self._model.state.source_uid = None
         self._model.state.time = None
         self._model.state.play = False
+        self._model.state.exit_reason = ExitReason.BACK_TO_CONFIG
         self._switch_to_tab("processes")
-        raise NextScene("Config")
+        raise StopApplication("User is going back to the config screen")
 
     def _help(self):
         """Show the help screen"""

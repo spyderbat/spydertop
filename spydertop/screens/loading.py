@@ -9,7 +9,9 @@
 A loading screen to show progress toward loading a set of records
 """
 
+from datetime import timedelta
 import re
+from threading import Thread
 from asciimatics.screen import Screen
 from asciimatics.widgets import Frame, Layout, Label
 from asciimatics.exceptions import NextScene
@@ -74,8 +76,6 @@ class LoadingFrame(Frame):
         )
 
         self._model = model
-        if not model.thread:
-            model.init(model.state.start_duration)
 
         layout = Layout([1], fill_frame=True)
         self.add_layout(layout)
@@ -139,13 +139,31 @@ class LoadingFrame(Frame):
     def update(self, frame_no):
         self.set_theme(self._model.settings.theme)
 
+        if not self._model.thread:
+            # we just started loading
+            def guard():
+                try:
+                    self._model.load_data(
+                        self._model.state.time.timestamp()
+                        if self._model.state.time
+                        else None,
+                        timedelta(minutes=5),
+                    )
+                except Exception as exc:  # pylint: disable=broad-except
+                    self._model.fail("An exception occurred while loading data")
+                    log.traceback(exc)
+
+            self._model.thread = Thread(target=guard)
+            self._model.thread.start()
         # see if the model is done
         if self._model.thread is not None:
             if self._model.failed:
                 self._model.thread.join()
+                self._model.thread = None
                 raise NextScene("Failure")
             if self._model.loaded:
                 self._model.thread.join()
+                self._model.thread = None
                 self._quit()
         super().update(frame_no)
 
