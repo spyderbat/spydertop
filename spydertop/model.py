@@ -313,28 +313,35 @@ not enough information could be loaded.\
 
         log.debug(f"Sending API log: {new_data}")
 
-        try:
-            headers = {
-                "Content-Type": "application/json",
-            }
-            if isinstance(self._record_pool.input_, Secret):
-                headers["Authorization"] = f"Bearer {self._record_pool.input_.api_key}"
-            # send the data to the API
-            response = self._http_client.request(
-                "POST",
-                f"{url}/api/v1/_/log",
-                headers=headers,
-                body=orjson.dumps(new_data),
-            )
-            # check the response
-            if response.status != 200:
-                # don't fail noisily, the user doesn't care about the log
-                log.debug(
-                    f"Logging API returned status {response.status} with message: {response.data}"
+        def send_log():
+            try:
+                headers = {
+                    "Content-Type": "application/json",
+                }
+                if isinstance(self._record_pool.input_, Secret):
+                    headers["Authorization"] = f"Bearer {self._record_pool.input_.api_key}"
+                # send the data to the API
+                response = self._http_client.request(
+                    "POST",
+                    f"{url}/api/v1/_/log",
+                    headers=headers,
+                    body=orjson.dumps(new_data),
                 )
-        except Exception as exc:  # pylint: disable=broad-except
-            log.debug("Exception when logging to API")
-            log.traceback(exc)
+                # check the response
+                if response.status != 200:
+                    # don't fail noisily, the user doesn't care about the log
+                    log.debug(
+                        f"Logging API returned status {response.status} with message: {response.data}"
+                    )
+            except Exception as exc:  # pylint: disable=broad-except
+                log.debug("Exception when logging to API")
+                log.traceback(exc)
+
+        # sending logs to the API should not block the ui,
+        # so do it in a daemon thread
+        thread = threading.Thread(target=send_log)
+        thread.daemon = True
+        thread.start()
 
     def submit_feedback(self, feedback: str) -> None:
         """Submit feedback to the spyderbat internal logging API"""

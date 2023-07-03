@@ -46,6 +46,7 @@ def start_screen(
         model.log_api(
             API_LOG_TYPES["startup"], {"term": environ.get("TERM", "unknown")}
         )
+        model.init(args.duration or timedelta(minutes=config.settings.default_duration_minutes))
 
         run_screens(
             lambda screen: [
@@ -92,7 +93,6 @@ def start_config_wizard(
         yaml.dump(config.as_dict()),
     )
     state = State()
-    default_duration = timedelta(minutes=config.settings.default_duration_minutes)
     if args.input is None:
         model = None
 
@@ -119,10 +119,8 @@ def start_config_wizard(
             )
             sys.exit(1)
         model = AppModel(config.settings, state, RecordPool(secret, args.output))
-        model.init(args.duration or default_duration)
     else:
         model = AppModel(config.settings, state, RecordPool(args.input, args.output))
-        model.init(args.duration or default_duration)
 
     return model
 

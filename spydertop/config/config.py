@@ -8,14 +8,24 @@
 """
 This module handles the reading, updating, and writing of configurations to the disk
 """
+import os
 from pathlib import Path
 from typing import Dict, List, Optional
 from dataclasses import asdict, dataclass, field
 
 import yaml
 
-from spydertop.config import DIRS
+from spydertop.config import DEFAULT_API_URL, DIRS
 from spydertop.config.secrets import Secret
+from spydertop.constants.columns import (
+    CONNECTION_COLUMNS,
+    CONTAINER_COLUMNS,
+    FLAG_COLUMNS,
+    LISTENING_SOCKET_COLUMNS,
+    PROCESS_COLUMNS,
+    SESSION_COLUMNS,
+    Column,
+)
 
 DEFAULT_CONFIG_PATH = Path(DIRS.user_config_dir) / "config.yaml"
 
@@ -117,8 +127,12 @@ class Config:
     @staticmethod
     def load_from_directory(config_dir: Path):
         """Loads a config instance from a file"""
+        load_cached_columns(config_dir)
         file = config_dir / "config.yaml"
         if not file.exists():
+            migrated_config = Config.migrate_config(config_dir)
+            if migrated_config:
+                return migrated_config
             return Config(
                 contexts={},
                 settings=Settings(),
@@ -146,6 +160,7 @@ class Config:
 
     def save(self):
         """Saves the config to the default location"""
+        save_cached_columns(self.directory)
         self.save_to_directory(self.directory)
 
     def save_to_directory(self, config_dir: Path):
@@ -161,3 +176,93 @@ class Config:
         }
         del data["directory"]
         return data
+
+    @staticmethod
+    def migrate_config(new_config_path: Path) -> Optional["Config"]:
+        """Migrates the config from the old location to the new location"""
+        home = os.environ.get("HOME")
+        if home is None:
+            return None
+        old_config_path = Path(home) / ".spyderbat-api"
+        if not old_config_path.exists():
+            return None
+        old_config = yaml.safe_load((old_config_path / "config.yaml").read_text()).get(
+            "default", None
+        )
+        if old_config is None:
+            return None
+        if "api_key" in old_config:
+            new_default_secret = Secret(
+                api_key=old_config.get("api_key"),
+                api_url=old_config.get("api_url", DEFAULT_API_URL),
+            )
+
+            secrets = Secret.get_secrets(new_config_path)
+            secrets["default"] = new_default_secret
+            Secret.set_secrets(new_config_path, secrets)
+
+        new_default_context = Context(
+            secret_name="default", org_uid=old_config.get("org"), source=old_config.get("machine")
+        )
+
+        old_settings = yaml.safe_load(
+            (old_config_path / ".spydertop-settings.yaml").read_text()
+        )
+        new_settings = Settings()
+        for key in new_settings.__dict__:
+            if key in old_settings:
+                setattr(new_settings, key, old_settings[key])
+
+        _load_enabled_columns(old_settings, "processes", PROCESS_COLUMNS)
+        _load_enabled_columns(old_settings, "connections", CONNECTION_COLUMNS)
+        _load_enabled_columns(old_settings, "listening_sockets", LISTENING_SOCKET_COLUMNS)
+        _load_enabled_columns(old_settings, "sessions", SESSION_COLUMNS)
+        _load_enabled_columns(old_settings, "flags", FLAG_COLUMNS)
+        _load_enabled_columns(old_settings, "containers", CONTAINER_COLUMNS)
+
+        return Config(
+            contexts={"default": new_default_context},
+            settings=new_settings,
+            active_context="default",
+            directory=new_config_path,
+        )
+
+def _load_enabled_columns(settings: Dict, name: str, columns: List[Column]):
+    if name in settings:
+        for key in settings[name]:
+            names = [row.header_name for row in columns]
+            if key in names:
+                columns[names.index(key)].enabled = settings[name][key]
+
+
+def load_cached_columns(config_dir: Path):
+    """Loads the cached columns from the config directory, if possible"""
+    file = config_dir / "columns.yaml"
+    if not file.exists():
+        return
+    data = yaml.safe_load(file.read_text())
+
+    _load_enabled_columns(data, "processes", PROCESS_COLUMNS)
+    _load_enabled_columns(data, "connections", CONNECTION_COLUMNS)
+    _load_enabled_columns(data, "listening_sockets", LISTENING_SOCKET_COLUMNS)
+    _load_enabled_columns(data, "sessions", SESSION_COLUMNS)
+    _load_enabled_columns(data, "flags", FLAG_COLUMNS)
+    _load_enabled_columns(data, "containers", CONTAINER_COLUMNS)
+
+
+def save_cached_columns(config_dir: Path):
+    """Saves the columns enabled state to the config directory"""
+    file = config_dir / "columns.yaml"
+    data = {}
+    for name, columns in [
+        ("processes", PROCESS_COLUMNS),
+        ("connections", CONNECTION_COLUMNS),
+        ("listening_sockets", LISTENING_SOCKET_COLUMNS),
+        ("sessions", SESSION_COLUMNS),
+        ("flags", FLAG_COLUMNS),
+        ("containers", CONTAINER_COLUMNS),
+    ]:
+        data[name] = {row.header_name: row.enabled for row in columns}
+    file.write_text(yaml.dump(data))
+
+
