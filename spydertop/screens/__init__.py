@@ -46,7 +46,9 @@ def start_screen(
         model.log_api(
             API_LOG_TYPES["startup"], {"term": environ.get("TERM", "unknown")}
         )
-        model.init(args.duration or timedelta(minutes=config.settings.default_duration_minutes))
+        model.init(
+            args.duration or timedelta(minutes=config.settings.default_duration_minutes)
+        )
 
         run_screens(
             lambda screen: [

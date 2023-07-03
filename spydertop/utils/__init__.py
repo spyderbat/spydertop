@@ -111,9 +111,9 @@ def convert_to_seconds(value: str) -> float:
         if time_type in switch:
             timestamp *= switch[time_type]
         else:
-            raise ValueError(
+            raise ValueError(  # pylint: disable=raise-missing-from
                 f"Invalid time type {time_type}"
-            )  # pylint: disable=raise-missing-from
+            )
     return timestamp
 
 

@@ -319,7 +319,9 @@ not enough information could be loaded.\
                     "Content-Type": "application/json",
                 }
                 if isinstance(self._record_pool.input_, Secret):
-                    headers["Authorization"] = f"Bearer {self._record_pool.input_.api_key}"
+                    headers[
+                        "Authorization"
+                    ] = f"Bearer {self._record_pool.input_.api_key}"
                 # send the data to the API
                 response = self._http_client.request(
                     "POST",
@@ -331,7 +333,8 @@ not enough information could be loaded.\
                 if response.status != 200:
                     # don't fail noisily, the user doesn't care about the log
                     log.debug(
-                        f"Logging API returned status {response.status} with message: {response.data}"
+                        f"Logging API returned status {response.status}"
+                        f" with message: {response.data}"
                     )
             except Exception as exc:  # pylint: disable=broad-except
                 log.debug("Exception when logging to API")

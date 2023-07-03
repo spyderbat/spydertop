@@ -26,6 +26,7 @@ from spydertop.constants.columns import (
     SESSION_COLUMNS,
     Column,
 )
+from spydertop.utils import log
 
 DEFAULT_CONFIG_PATH = Path(DIRS.user_config_dir) / "config.yaml"
 
@@ -132,6 +133,14 @@ class Config:
         if not file.exists():
             migrated_config = Config.migrate_config(config_dir)
             if migrated_config:
+                migrated_config.save()
+                old_config_location = (
+                    Path(os.environ.get("HOME") or "~") / ".spyderbat-api"
+                )
+                log.warn(
+                    f"Your old configuration has been migrated to the new location in {config_dir}."
+                    f" You can now delete the old configuration in {old_config_location}"
+                )
                 return migrated_config
             return Config(
                 contexts={},
@@ -202,7 +211,9 @@ class Config:
             Secret.set_secrets(new_config_path, secrets)
 
         new_default_context = Context(
-            secret_name="default", org_uid=old_config.get("org"), source=old_config.get("machine")
+            secret_name="default",
+            org_uid=old_config.get("org"),
+            source=old_config.get("machine"),
         )
 
         old_settings = yaml.safe_load(
@@ -215,7 +226,9 @@ class Config:
 
         _load_enabled_columns(old_settings, "processes", PROCESS_COLUMNS)
         _load_enabled_columns(old_settings, "connections", CONNECTION_COLUMNS)
-        _load_enabled_columns(old_settings, "listening_sockets", LISTENING_SOCKET_COLUMNS)
+        _load_enabled_columns(
+            old_settings, "listening_sockets", LISTENING_SOCKET_COLUMNS
+        )
         _load_enabled_columns(old_settings, "sessions", SESSION_COLUMNS)
         _load_enabled_columns(old_settings, "flags", FLAG_COLUMNS)
         _load_enabled_columns(old_settings, "containers", CONTAINER_COLUMNS)
@@ -226,6 +239,7 @@ class Config:
             active_context="default",
             directory=new_config_path,
         )
+
 
 def _load_enabled_columns(settings: Dict, name: str, columns: List[Column]):
     if name in settings:
@@ -264,5 +278,3 @@ def save_cached_columns(config_dir: Path):
     ]:
         data[name] = {row.header_name: row.enabled for row in columns}
     file.write_text(yaml.dump(data))
-
-
