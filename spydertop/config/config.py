@@ -195,9 +195,9 @@ class Config:
         old_config_path = Path(home) / ".spyderbat-api"
         if not old_config_path.exists():
             return None
-        old_config = yaml.safe_load((old_config_path / "config.yaml").read_text()).get(
-            "default", None
-        )
+        old_config = yaml.safe_load(
+            (old_config_path / "config.yaml").read_text(encoding="utf-8")
+        ).get("default", None)
         if old_config is None:
             return None
         if "api_key" in old_config:
@@ -217,7 +217,7 @@ class Config:
         )
 
         old_settings = yaml.safe_load(
-            (old_config_path / ".spydertop-settings.yaml").read_text()
+            (old_config_path / ".spydertop-settings.yaml").read_text(encoding="utf-8")
         )
         new_settings = Settings()
         for key in new_settings.__dict__:
