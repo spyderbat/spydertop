@@ -90,7 +90,10 @@ def convert_to_seconds(value: str) -> float:
         timestamp = float(value[:-1])
         # convert to seconds
         switch = {"s": 1, "m": 60, "h": 3600, "d": 3600 * 24, "y": 3600 * 24 * 365}
-        timestamp *= switch[time_type]
+        if time_type in switch:
+            timestamp *= switch[time_type]
+        else:
+            raise ValueError(f"Invalid time type {time_type}") # pylint: disable=raise-missing-from
     return timestamp
 
 

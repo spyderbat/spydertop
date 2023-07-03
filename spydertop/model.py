@@ -366,6 +366,8 @@ not enough information could be loaded.\
         if muid is not None:
             if not self.tops_valid():
                 return None
+            if muid not in self._tops:
+                return None
             return self._tops[muid][index][key]
         return sum_element_wise(c_list[index][key] for c_list in self._tops.values())
 
@@ -516,7 +518,8 @@ not enough information could be loaded.\
                     return False
             return True
         return (
-            self._tops[muid].is_valid(0)
+            muid in self._tops
+            and self._tops[muid].is_valid(0)
             and self._tops[muid].is_valid(-1)
             and abs(self._tops[muid][0]["time"] - self._timestamp) < grace_period
         )
@@ -600,6 +603,8 @@ not enough information could be loaded.\
         if not self.tops_valid():
             return None
         if self.selected_machine is not None:
+            if self.selected_machine not in self._meminfo:
+                return None
             return self._meminfo[self.selected_machine]
         # create a sum of all machines
         return sum_element_wise(  # type: ignore
