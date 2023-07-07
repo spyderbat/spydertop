@@ -357,18 +357,10 @@ def get_context(ctx: click.Context, name: Optional[str] = None):
 
 @config.command()
 @click.option(
-    "--name",
-    "-n",
-    type=str,
-    help="Name of the context to create or update.",
-    required=True,
-)
-@click.option(
     "--secret",
     "-s",
     type=SecretsParam(),
     help="Name of the secret to use in this context. Defaults to 'default'",
-    default="default",
 )
 @click.option(
     "--organization",
@@ -378,34 +370,56 @@ def get_context(ctx: click.Context, name: Optional[str] = None):
     help="Name or ID of the organization to pull data from",
 )
 @click.option(
+    "--source",
+    type=str,
+    help="ID of the machine or cluster to load",
+)
+@click.option(
     "--focus",
     "-f",
     type=str,
     help="ID of the record to focus on",
 )
 @click.option(
-    "--source",
+    "--time",
     type=str,
-    help="ID of the machine or cluster to load",
+    help="The default time to use when loading data. Can be an absolute time, or a relative time.",
+)
+@click.argument(
+    "name",
+    type=ContextParam(),
 )
 @click.pass_context
 def set_context(  # pylint: disable=too-many-arguments
     ctx: click.Context,
-    secret: str,
+    secret: Optional[str],
     name: str,
-    organization: str,
+    organization: Optional[str],
     focus: Optional[str],
     source: Optional[str],
+    time: Optional[str],
 ):
     """
     Create or update a context for loading data.
     """
+    if time is not None:
+        Timestamp().convert(time, None, None)
+    focuses = []
     inner_config = get_config_from_ctx(ctx)
-    if source is not None and focus is not None:
-        focuses = Focus.get_focuses(source, focus)
-    else:
-        focuses = []
-    inner_config.contexts[name] = Context(secret, organization, source, focuses)
+    if name in inner_config.contexts:
+        click.echo(f"Context {name} already exists. Updating.")
+        context = inner_config.contexts[name]
+        secret = secret or context.secret_name
+        organization = organization or context.org_uid
+        source = source or context.source
+        time = time or context.time
+        focuses = context.focus
+    if focus is not None:
+        focuses = Focus.get_focuses(focus)
+
+    inner_config.contexts[name] = Context(
+        secret or "default", organization, source, time, focuses
+    )
     inner_config.save()
 
 
@@ -442,13 +456,6 @@ def delete_context(ctx: click.Context, name: str):
 
 @config.command("set-secret")
 @click.option(
-    "--name",
-    "-n",
-    type=str,
-    help="Name of the secret to create or update. Defaults to 'default'",
-    default="default",
-)
-@click.option(
     "--api-key",
     "--apikey",
     "-k",
@@ -464,6 +471,7 @@ def delete_context(ctx: click.Context, name: str):
     help="URL target for api queries.",
     default=DEFAULT_API_URL,
 )
+@click.argument("name", type=SecretsParam(), required=True)
 @click.pass_context
 def set_api_secret(
     ctx: click.Context,

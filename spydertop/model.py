@@ -79,6 +79,9 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
         self._http_client = urllib3.PoolManager()
         self._record_pool = record_pool
 
+        log.info("Creating model with state:")
+        log.info(repr(self.state))
+
     def __del__(self):
         if self.thread:
             self.thread.join()
@@ -203,7 +206,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
                 )[0]
             if len(self._record_pool.records["model_machine"]) > 1:
                 # the user will have to select a machine later
-                self.selected_machine = None
+                self.selected_machine = self.selected_machine or None
 
         except Exception as exc:  # pylint: disable=broad-except
             log.err("Exception occurred while fixing state:")

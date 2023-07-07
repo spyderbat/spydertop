@@ -120,18 +120,18 @@ class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
         # set up information that is already in config or args
         if self.config.active_context is not None:
-            secret = self.config.contexts[self.config.active_context].get_secret(
-                config.directory
-            )
+            context = self.config.contexts[self.config.active_context]
+            secret = context.get_secret(config.directory)
             if secret is not None:
                 self.set_api_key(secret.api_key, secret.api_url)
                 self.cache.has_account = True
-            self.state.org_uid = (
-                self.config.contexts[self.config.active_context].org_uid or ""
-            )
-            self.state.source_uid = self.config.contexts[
-                self.config.active_context
-            ].source
+            self.state.org_uid = context.org_uid or ""
+            self.state.source_uid = context.source
+            if context.time is not None:
+                import dateparser  # pylint: disable=import-outside-toplevel
+
+                self.state.time = dateparser.parse(context.time)
+                log.log("parsing time:", context, self.state.time)
 
         if self.args.source is not None:
             if "*" in self.args.source:
@@ -143,7 +143,7 @@ class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self.cache.duration = args.duration or timedelta(
             minutes=config.settings.default_duration_minutes
         )
-        self.state.time = args.timestamp
+        self.state.time = args.timestamp or self.state.time
 
         self.state.org_uid = self.args.organization or self.state.org_uid
 
@@ -257,7 +257,6 @@ class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
                 )
                 self.config.active_context = "default"
             log.info("Config is complete, starting load")
-            log.info(yaml.dump(self.config.as_dict()))
             raise StopApplication("Finished configuration")
 
         if current_step == ConfigStep.HAS_ACCOUNT:

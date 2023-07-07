@@ -257,7 +257,8 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                         relative_x -= col.max_width + 1
                 else:
                     # select the clicked row
-                    self.value = relative_y - 1 + self._vertical_offset
+                    header_offset = 1 if self.header_enabled else 0
+                    self.value = relative_y - header_offset + self._vertical_offset
                 return None
         return event
 

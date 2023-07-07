@@ -50,7 +50,11 @@ def start_screen(
             args.duration or timedelta(minutes=config.settings.default_duration_minutes)
         )
 
-        context = config.contexts.get(config.active_context) if config.active_context is not None else None
+        context = (
+            config.contexts.get(config.active_context)
+            if config.active_context is not None
+            else None
+        )
         focus = context.focus if context is not None else []
 
         run_screens(

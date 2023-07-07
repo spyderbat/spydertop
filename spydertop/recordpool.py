@@ -101,7 +101,7 @@ class RecordPool:
                 method="POST",
                 url="/api/v1/source/query/",
                 **input_data,
-                src_uid=source_uid,
+                src_uid=f"{source_uid}_base",
                 data_type="k8s",
             )
             log.info("Parsing cluster data")
@@ -344,8 +344,8 @@ Args: {exc.args}\
 
             if api_response.status != 200:
                 sanitized_headers = {
-                    "Authorization": f"Bearer {obscure_key(self.input_.api_key)}",
                     **headers,
+                    "Authorization": f"Bearer {obscure_key(self.input_.api_key)}",
                 }
                 log.debug(
                     f"""\

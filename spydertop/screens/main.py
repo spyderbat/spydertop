@@ -267,12 +267,15 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self.fix()
         self._switch_to_tab(self._model.settings.tab, force=True)
         self.switch_focus(self._main, 0, 0)
+        self._widgets_initialized = True
+
+        # this is necessary to update the rows in Table, which is needed for _find below
+        self.update(0)
         for focus in self._focuses:
             if focus.type == Focus.TAB:
                 self._switch_to_tab(focus.value)
             elif focus.type == Focus.RECORD:
-                self._columns.find(focus.value)
-        self._widgets_initialized = True
+                self._columns.find(f"id: {focus.value}")
 
     def _get_available_tabs(self):
         available_tabs = [

@@ -8,7 +8,6 @@
 """
 This module handles the reading, updating, and writing of configurations to the disk
 """
-from datetime import datetime
 import os
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -53,7 +52,7 @@ class Focus:
     }
 
     @staticmethod
-    def get_focuses(_source: str, focus_id: str):
+    def get_focuses(focus_id: str):
         """Creates a list of focus objects from a focus id"""
         id_type = focus_id.split(":")[0]
         if id_type == "mach":
@@ -74,8 +73,9 @@ class Context:
     """
 
     secret_name: str
-    org_uid: Optional[str]
-    source: Optional[str]
+    org_uid: Optional[str] = None
+    source: Optional[str] = None
+    time: Optional[str] = None  # relative time
     focus: List[Focus] = field(default_factory=list)
 
     def as_dict(self):
@@ -124,9 +124,9 @@ class Config:
     the default duration, whether to cache data, etc.
     """
 
-    contexts: Dict[str, Context]
-    active_context: Optional[str]
-    settings: Settings
+    contexts: Dict[str, Context] = field(default_factory=dict)
+    active_context: Optional[str] = None
+    settings: Settings = field(default_factory=Settings)
 
     directory: Path = field(default=Path(DIRS.user_config_dir), repr=False)
 
@@ -148,9 +148,6 @@ class Config:
                 )
                 return migrated_config
             return Config(
-                contexts={},
-                settings=Settings(),
-                active_context=None,
                 directory=config_dir,
             )
         data = yaml.safe_load(file.read_text())
