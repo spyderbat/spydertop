@@ -137,9 +137,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         )
         header.add_widget(
             FuncLabel(
-                lambda: get_machine_short_name(
-                    self._model.machines[self._model.selected_machine]
-                )
+                lambda: self._model.get_machine_short_name(self._model.selected_machine)
                 if self._model.selected_machine is not None
                 else ""
             ),
@@ -149,21 +147,35 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         # meters
         self._cpus = {}
         cpu_count = 0
-        for machine in self._model.machines.values():
-            cpu_count = machine["machine_cores"]
-            self._cpus[machine["id"]] = []
+        machines_to_show = (
+            [self._model.selected_machine]
+            if self._model.selected_machine is not None
+            else self._model.machines.keys()
+        )
+        for machine_id in machines_to_show:
+            machine = self._model.machines.get(machine_id)
+            if machine is not None:
+                cpu_count = machine["machine_cores"]
+            else:
+                times = self._model.get_value("cpu_time", machine_id)
+                if times is None:
+                    continue
+                cpu_count = len(times.keys().filter(lambda x: x != "cpu"))
+            self._cpus[machine_id] = []
 
             for i in range(0, cpu_count):
                 if i == 0:
                     name = (
                         align_with_overflow(
-                            get_machine_short_name(machine), 20, include_padding=False
+                            self._model.get_machine_short_name(machine_id),
+                            20,
+                            include_padding=False,
                         )
                         + f" {i} "
                     )
                 else:
                     name = f"{i:<3}"
-                self._cpus[machine["id"]].append(
+                self._cpus[machine_id].append(
                     Meter(
                         name,
                         values=[0, 0, 0, 0],
@@ -182,7 +194,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
                     column = 0
                 else:
                     column = 1
-                header.add_widget(self._cpus[machine["id"]][i], column)
+                header.add_widget(self._cpus[machine_id][i], column)
         self._memory = Meter(
             "Mem",
             values=[0, 0, 0, 0],
@@ -542,6 +554,9 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             return
 
         for record in records.values():
+            # exlude records that are not in the selected_machine
+            if "muid" in record and record["muid"] != self._model.selected_machine:
+                continue
             # determine if the record is visible for this time
             if "valid_from" in record:
                 if record["valid_from"] > self._model.timestamp or (

@@ -62,6 +62,14 @@ class RecordPool:
         if isinstance(self.input_, Secret) and self._connection_pool is None:
             self._connection_pool = urllib3.PoolManager()
 
+    def __del__(self):
+        self.close()
+
+    def close(self):
+        """Close the record pool"""
+        if not isinstance(self._output, Secret) and self._output is not None:
+            self._output.close()
+
     def load_api(  # pylint: disable=too-many-arguments
         self,
         org_uid: str,

@@ -25,7 +25,7 @@ from spydertop.config.config import Settings
 from spydertop.config.secrets import Secret
 from spydertop.recordpool import RecordPool
 from spydertop.state import State
-from spydertop.utils import get_timezone, log, sum_element_wise
+from spydertop.utils import get_machine_short_name, get_timezone, log, sum_element_wise
 from spydertop.utils.types import APIError, Record, Tree
 from spydertop.utils.cursorlist import CursorList
 from spydertop.constants import API_LOG_TYPES
@@ -83,8 +83,13 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
         log.info(repr(self.state))
 
     def __del__(self):
+        self.close()
+
+    def close(self):
+        """Close the model, cleaning up any resources"""
         if self.thread:
             self.thread.join()
+        self._record_pool.close()
 
     def init(self, start_duration: Optional[timedelta]) -> None:
         """Initialize the model, loading data from the source. Requires config to be complete"""
@@ -577,6 +582,23 @@ not enough information could be loaded.\
             if record_id in group:
                 return group[record_id]
         return None
+
+    def get_machine_short_name(self, machine_id: str) -> str:
+        """Get the short name of a machine"""
+        source = [
+            source
+            for source in self._record_pool.sources.get(self.state.org_uid, [])
+            if source["id"] == machine_id
+        ]
+        alternative_name = (
+            get_machine_short_name(self.machines[machine_id])
+            if machine_id in self.machines
+            else machine_id
+        )
+        if len(source) == 0:
+            return alternative_name
+        source_name = source[0].get("description", source[0].get("runtime_description"))
+        return source_name or alternative_name
 
     @property
     def loaded(self) -> bool:

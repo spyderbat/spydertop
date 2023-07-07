@@ -206,6 +206,13 @@ PROCESS_COLUMNS = [
     Column("PID", 7, int),
     Column("MUID", 16, str, enabled=False),
     Column(
+        "Machine",
+        16,
+        str,
+        enabled=False,
+        value_getter=lambda m, x: m.get_machine_short_name(x["muid"]),
+    ),
+    Column(
         "USER",
         9,
         str,

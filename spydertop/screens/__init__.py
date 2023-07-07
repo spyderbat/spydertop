@@ -76,6 +76,7 @@ def start_screen(
                 " reading from a file. Exiting instead"
             )
             break
+        model.close()
         log.info("Returning to configuration wizard")
 
     # save settings which should persist across sessions
@@ -85,6 +86,7 @@ def start_screen(
         API_LOG_TYPES["shutdown"],
         {"failure_state": model.failure_reason if model.failed else "None"},
     )
+    model.close()
 
     log.info("Gracefully exiting")
 
