@@ -223,7 +223,7 @@ def align_with_overflow(
 
 def get_machine_short_name(machine: Record) -> str:
     """Get a short name for a machine"""
-    if machine["cloud_tags"] and "Name" in machine["cloud_tags"]:
+    if "cloud_tags" in machine and "Name" in machine["cloud_tags"]:
         if "k8s" in "".join(list(machine["cloud_tags"].keys())):
             return "node:" + machine["hostname"]
         return machine["cloud_tags"]["Name"]
