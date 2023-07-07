@@ -27,7 +27,7 @@ from asciimatics.widgets import (
 from asciimatics.exceptions import NextScene
 from asciimatics.event import KeyboardEvent
 from asciimatics.strings import ColouredText
-from spydertop.config.config import Settings
+from spydertop.config.config import Focus, Settings
 
 from spydertop.model import AppModel
 from spydertop.screens.setup import SetupFrame
@@ -85,6 +85,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     _current_columns: List[Column] = PROCESS_COLUMNS
     _old_column_val = None
     _last_effects: int = 1
+    _focuses: List[Focus] = []
 
     # widgets
     _main: Optional[Layout] = None
@@ -97,7 +98,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     _columns: Table
 
     # -- initialization -- #
-    def __init__(self, screen, model: AppModel) -> None:
+    def __init__(self, screen, model: AppModel, focuses: List[Focus]) -> None:
         # pylint: disable=duplicate-code
         super().__init__(
             screen,
@@ -110,6 +111,12 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self._model = model
         self._old_settings = deepcopy(model.settings)
         self._old_state = deepcopy(model.state)
+
+        self._focuses = focuses
+
+        for focus in self._focuses:
+            if focus.type == Focus.MACHINE:
+                self._model.selected_machine = focus.value
 
         self.set_theme(model.settings.theme)
 
@@ -260,6 +267,11 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self.fix()
         self._switch_to_tab(self._model.settings.tab, force=True)
         self.switch_focus(self._main, 0, 0)
+        for focus in self._focuses:
+            if focus.type == Focus.TAB:
+                self._switch_to_tab(focus.value)
+            elif focus.type == Focus.RECORD:
+                self._columns.find(focus.value)
         self._widgets_initialized = True
 
     def _get_available_tabs(self):

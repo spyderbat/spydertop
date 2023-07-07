@@ -8,6 +8,7 @@
 """
 This module handles the reading, updating, and writing of configurations to the disk
 """
+from datetime import datetime
 import os
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -38,7 +39,11 @@ class Focus:
     type: str
     value: str
 
-    TYPES = {"machine", "tab", "record"}
+    # types
+    MACHINE = "machine"
+    TAB = "tab"
+    RECORD = "record"
+
     TAB_MAP = {
         "cont": "containers",
         "proc": "processes",
@@ -52,11 +57,11 @@ class Focus:
         """Creates a list of focus objects from a focus id"""
         id_type = focus_id.split(":")[0]
         if id_type == "mach":
-            return [Focus(type="machine", value=focus_id)]
+            return [Focus(type=Focus.MACHINE, value=focus_id)]
         if id_type in Focus.TAB_MAP:
             return [
-                Focus(type="tab", value=Focus.TAB_MAP[id_type]),
-                Focus(type="record", value=focus_id),
+                Focus(type=Focus.TAB, value=Focus.TAB_MAP[id_type]),
+                Focus(type=Focus.RECORD, value=focus_id),
             ]
         return []
 

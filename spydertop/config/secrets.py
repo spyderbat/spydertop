@@ -70,5 +70,11 @@ class Secret:
 
         secrets_as_json = {name: asdict(secret) for name, secret in secrets.items()}
 
+        if not secret_file.exists():
+            # note: the parent directory should already exist, as it is created by
+            # the PlatformDirs class
+            secret_file.touch()
+            secret_file.chmod(0o600)
+
         with open(secret_file, "w", encoding="utf-8") as file:
             yaml.dump(secrets_as_json, file)
