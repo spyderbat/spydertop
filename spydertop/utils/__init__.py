@@ -239,6 +239,17 @@ def align_with_overflow(
     return text
 
 
+def get_source_name(source: dict) -> str:
+    """Returns the name of a source"""
+    if "description" in source:
+        return source["description"]
+    if "runtime_description" in source:
+        return source["runtime_description"]
+    if "uid" in source:
+        return source["uid"]
+    return "Unknown"
+
+
 def get_machine_short_name(machine: Record) -> str:
     """Get a short name for a machine"""
     if "cloud_tags" in machine and "Name" in machine["cloud_tags"]:

@@ -30,7 +30,6 @@ from asciimatics.widgets import (
 from asciimatics.screen import Screen
 from asciimatics.event import KeyboardEvent
 from asciimatics.exceptions import StopApplication
-import yaml
 from spydertop.config import DEFAULT_API_URL
 
 from spydertop.config.config import Config, Context

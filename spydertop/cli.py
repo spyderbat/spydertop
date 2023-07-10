@@ -29,10 +29,10 @@ from spydertop.config.config import (
     Context,
     Focus,
 )
+from spydertop.recordpool import RecordPool
 from spydertop.screens import start_screen
 
-# from spydertop.screens import start_screen
-from spydertop.utils import convert_to_seconds, log
+from spydertop.utils import convert_to_seconds, get_source_name, log
 from spydertop.utils.types import LoadArgs
 
 
@@ -154,6 +154,60 @@ SUB_EPILOG = """
 Run 'spydertop COMMAND --help' for more information on a command.
 """
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
+
+
+def ensure_org_uid(recordpool: RecordPool, organization: str) -> Optional[str]:
+    """Converts an organization's name or uid to a uid"""
+    click.echo("Loading organizations...")
+    recordpool.load_orgs()
+    maybe_org = [
+        o
+        for o in recordpool.orgs
+        if o.get("uid") == organization or o.get("name") == organization
+    ]
+    if len(maybe_org) == 0:
+        answer = click.confirm(
+            f"Organization '{organization}' does not exist."
+            " Would you like to see a list of organizations?",
+            default=True,
+        )
+        if answer:
+            click.echo(
+                "\n".join([o["name"] for o in recordpool.orgs]),
+            )
+        return None
+    return maybe_org[0]["uid"]
+
+
+def ensure_source_uid(
+    recordpool: RecordPool, organization: Optional[str], source: str
+) -> Optional[str]:
+    """Converts a source's name or uid to a uid"""
+    if source.startswith("mach:") or source.startswith("clus:"):
+        return source
+
+    if organization is None:
+        raise click.BadParameter(
+            "You must specify an organization when specifying a source by name.",
+            param=organization,
+        )
+    click.echo("Loading sources...")
+    recordpool.load_sources(organization)
+    maybe_source = [
+        s
+        for s in recordpool.sources.get(organization, [])
+        if s.get("uid") == source or get_source_name(s) == source
+    ]
+    if len(maybe_source) == 0:
+        answer = click.confirm(
+            f"Source '{source}' does not exist. Would you like to see a list of sources?"
+        )
+        if answer:
+            click.echo(
+                [get_source_name(s) for s in recordpool.sources.get(organization, [])]
+            )
+        return None
+    return maybe_source[0]["uid"]
 
 
 @click.group(context_settings={**CONTEXT_SETTINGS})
@@ -291,6 +345,25 @@ def load(  # pylint: disable=too-many-arguments
                 "Input file must be a text gzip file, not a binary gzip file"
             )
 
+    inner_config = get_config_from_ctx(ctx)
+
+    context = (
+        inner_config.contexts[inner_config.active_context]
+        if inner_config.active_context
+        else None
+    )
+    secret = context.get_secret(inner_config.directory) if context else None
+    recordpool = RecordPool(secret) if secret else None
+
+    if organization is not None and recordpool is not None:
+        organization = ensure_org_uid(recordpool, organization)
+        if organization is None:
+            return
+    if machine is not None and organization is not None and recordpool is not None:
+        machine = ensure_source_uid(recordpool, organization, machine)
+        if machine is None:
+            return
+
     args = LoadArgs(
         organization=organization,
         source=machine,
@@ -346,6 +419,9 @@ def get_context(ctx: click.Context, name: Optional[str] = None):
     Shows a specific context, or all contexts if no name is specified
     """
     inner_config = get_config_from_ctx(ctx)
+    if name is not None and name not in inner_config.contexts:
+        click.echo(f"Context {name} does not exist")
+        ctx.exit(1)
     if name is not None:
         contexts = {name: inner_config.contexts[name].as_dict()}
     else:
@@ -372,7 +448,7 @@ def get_context(ctx: click.Context, name: Optional[str] = None):
 @click.option(
     "--source",
     type=str,
-    help="ID of the machine or cluster to load",
+    help="Name or ID of the machine or cluster to load",
 )
 @click.option(
     "--focus",
@@ -416,11 +492,28 @@ def set_context(  # pylint: disable=too-many-arguments
         focuses = context.focus
     if focus is not None:
         focuses = Focus.get_focuses(focus)
+    if secret is None:
+        secret = "default"
+
+    actual_secret = inner_config.get_secret(secret)
+    if actual_secret is None:
+        click.echo(f"Secret '{secret}' does not exist.")
+        return
+    recordpool = RecordPool(actual_secret)
+    if organization is not None:
+        organization = ensure_org_uid(recordpool, organization)
+        if organization is None:
+            return
+    if source is not None:
+        source = ensure_source_uid(recordpool, organization, source)
+        if source is None:
+            return
 
     inner_config.contexts[name] = Context(
         secret or "default", organization, source, time, focuses
     )
     inner_config.save()
+    click.echo(f"Context {name} saved.")
 
 
 @config.command()
@@ -507,6 +600,9 @@ def get_api_secret(ctx: click.Context, name=None):
     """Describe one or many api secrets."""
     config_dir = get_config_from_ctx(ctx).directory
     secrets = Secret.get_secrets(config_dir)
+    if name is not None and name not in secrets:
+        click.echo(f"Secret {name} does not exist")
+        return
     if name:
         secrets = {name: secrets[name].as_dict()}
     else:

@@ -188,6 +188,10 @@ class Config:
         del data["directory"]
         return data
 
+    def get_secret(self, secret_name: str) -> Optional[Secret]:
+        """Returns a secret by name"""
+        return Secret.get_secrets(self.directory).get(secret_name, None)
+
     @staticmethod
     def migrate_config(new_config_path: Path) -> Optional["Config"]:
         """Migrates the config from the old location to the new location"""

@@ -10,6 +10,8 @@ The main frame for the tool. This frame contains the record list and usage metri
 as well as showing all the menu buttons.
 """
 
+# pylint: disable=too-many-lines
+
 from copy import deepcopy
 import re
 from typing import Any, Dict, List, Optional
@@ -46,7 +48,6 @@ from spydertop.state import ExitReason
 from spydertop.widgets import Table
 from spydertop.utils import (
     align_with_overflow,
-    get_machine_short_name,
     log,
     convert_to_seconds,
     pretty_time,
