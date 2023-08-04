@@ -28,8 +28,6 @@ from asciimatics.widgets import (
     Frame,
     Layout,
     ListBox,
-    CheckBox,
-    RadioButtons,
     Text,
 )
 from asciimatics.event import KeyboardEvent, MouseEvent
@@ -44,7 +42,8 @@ from spydertop.constants.columns import (
     Column,
 )
 from spydertop.model import AppModel
-from ..utils import is_event_in_widget
+from spydertop.utils import is_event_in_widget
+from spydertop.widgets.form import value_to_widget
 
 # the following are a set of functions that are used to fill in the options
 # some of these are only necessary due to python's lambda behavior
@@ -63,19 +62,28 @@ def change_columns(columns: List[Column], name):
     return inner
 
 
-def set_config(name):
-    """Create a lambda to set a config value"""
+def set_setting(name):
+    """Create a lambda to set a config value in the settings"""
 
     if name == "play_speed":
 
-        def set_play(val, model):
+        def set_play(val, model: AppModel):
             if val != 0.0:
-                model.config[name] = val
+                setattr(model.settings, name, val)
 
         return set_play
 
-    def inner(val, model):
-        model.config[name] = val
+    def inner(val, model: AppModel):
+        setattr(model.settings, name, val)
+
+    return inner
+
+
+def set_state(name):
+    """Create a lambda to set a config value in the state"""
+
+    def inner(val, model: AppModel):
+        setattr(model.state, name, val)
 
     return inner
 
@@ -83,12 +91,6 @@ def set_config(name):
 def get_enabled(columns: List[Column], index: int):
     """Get the enabled status of a column"""
     return lambda _: columns[index].enabled
-
-
-def collapse_tree(val, model):
-    """Create a lambda to set the collapse tree value"""
-    model.config["collapse_tree"] = val
-    model.rebuild_tree()
 
 
 # the options dict is structured the same way
@@ -155,53 +157,58 @@ OPTIONS = {
         "Settings": [
             (
                 "Hide Threads",
-                (True, lambda model: model.config["hide_threads"]),
-                set_config("hide_threads"),
+                (True, lambda model: model.settings.hide_threads),
+                set_setting("hide_threads"),
             ),
             (
                 "Hide Kernel Threads",
-                (True, lambda model: model.config["hide_kthreads"]),
-                set_config("hide_kthreads"),
+                (True, lambda model: model.settings.hide_kthreads),
+                set_setting("hide_kthreads"),
             ),
             (
                 "Sort Ascending",
-                (True, lambda model: model.config["sort_ascending"]),
-                set_config("sort_ascending"),
+                (True, lambda model: model.state.sort_ascending),
+                set_state("sort_ascending"),
             ),
             (
                 "Cursor Follows Record",
-                (False, lambda model: model.config["follow_record"]),
-                set_config("follow_record"),
+                (False, lambda model: model.settings.follow_record),
+                set_setting("follow_record"),
             ),
             (
                 "Use UTC Time",
-                (False, lambda model: model.config["utc_time"]),
-                set_config("utc_time"),
+                (False, lambda model: model.settings.utc_time),
+                set_setting("utc_time"),
             ),
             (
                 "Play",
-                (False, lambda model: model.config["play"]),
-                set_config("play"),
+                (False, lambda model: model.state.play),
+                set_state("play"),
             ),
             (
                 "Play Speed",
-                (1.0, lambda model: model.config["play_speed"]),
-                set_config("play_speed"),
+                (1.0, lambda model: model.settings.play_speed),
+                set_setting("play_speed"),
             ),
             (
                 "Tree",
-                (False, lambda model: model.config["tree"]),
-                set_config("tree"),
+                (False, lambda model: model.settings.tree),
+                set_setting("tree"),
             ),
             (
                 "Collapse All",
-                (False, lambda model: model.config["collapse_tree"]),
-                collapse_tree,
+                (False, lambda model: model.settings.collapse_tree),
+                set_setting("collapse_tree"),
             ),
             (
                 "Filter",
-                ("", lambda model: model.config["filter"]),
-                set_config("filter"),
+                ("", lambda model: model.state.filter),
+                set_state("filter"),
+            ),
+            (
+                "Default Loading Duration (min)",
+                (15, lambda model: model.settings.default_duration_minutes),
+                set_setting("default_duration_minutes"),
             ),
         ],
         "Colors": [
@@ -209,9 +216,9 @@ OPTIONS = {
                 "Select Color Scheme:",
                 (
                     {"htop", "spyderbat", "monochrome", "green", "bright", "tlj256"},
-                    lambda model: model.config["theme"],
+                    lambda model: model.settings.theme,
                 ),
-                set_config("theme"),
+                set_setting("theme"),
             ),
         ],
     },
@@ -267,7 +274,7 @@ class SetupFrame(Frame):
 
         self._main_column.value = "Columns"
 
-        self.set_theme(self._model.config["theme"])
+        self.set_theme(self._model.settings.theme)
 
         self.rebuild()
 
@@ -290,8 +297,8 @@ class SetupFrame(Frame):
                     self._on_death()
 
         super().process_event(event)
-        if self._model.config.settings_changed:
-            self.set_theme(self._model.config["theme"])
+        if self._model.settings.theme != self._theme:
+            self.set_theme(self._model.settings.theme)
 
     def make_widget(self, row):
         """Construct a widget for the given row based on its type."""
@@ -302,58 +309,18 @@ class SetupFrame(Frame):
         if isinstance(values, tuple):
             values, default_getter = values
 
-        if isinstance(values, bool):
-            # make checkbox
-            checkbox = CheckBox(
-                label, on_change=lambda: on_change(checkbox.value, self._model)
-            )
-            checkbox.value = default_getter(self._model) if default_getter else values
-            return checkbox
-
-        if isinstance(values, set):
-            # make radio
-            radio = RadioButtons(
-                [(x, x) for x in values],
-                label=label,
-                on_change=lambda: on_change(radio.value, self._model),
-            )
-            if default_getter:
-                radio.value = default_getter(self._model)
-            return radio
-
-        if isinstance(values, str):
-            # make textbox
+        widget = value_to_widget(
+            label, values, lambda _, val: on_change(val, self._model)
+        )
+        if isinstance(widget, Text):
             self._has_textbox = True
-            textbox = Text(
-                label=label, on_change=lambda: on_change(textbox.value, self._model)
-            )
-            textbox.value = default_getter(self._model) if default_getter else values
-            return textbox
+        if default_getter:
+            if isinstance(widget, Text):
+                widget.value = str(default_getter(self._model))
+            else:
+                widget.value = default_getter(self._model)
 
-        if isinstance(values, float):
-            # make numerical input
-            def validate(value):
-                try:
-                    _ = float(value)
-                    return True
-                except ValueError:
-                    return False
-
-            textbox = Text(
-                label=label,
-                validator=validate,
-                on_change=(
-                    lambda: on_change(float(textbox.value), self._model)
-                    if validate(textbox.value)
-                    else None
-                ),
-            )
-            textbox.value = str(
-                default_getter(self._model) if default_getter else values
-            )
-            return textbox
-
-        raise ValueError(f"Unknown type for widget {type(values)}")
+        return widget
 
     # The only way to remove and re-add widgets in Asciimatics is to use
     # Layout.clear_widgets(). Therefore, we need to be able to easily rebuild the entire

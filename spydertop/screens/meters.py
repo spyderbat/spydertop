@@ -150,7 +150,7 @@ def show_network(model: AppModel):
         rx_bytes += "i"
     return add_palette(
         "  ${{{meter_label}}}Network: rx: ${{2}}{rx}b/s ${{{meter_label}}}\
-write: ${{4}}{tx}b/s ${{{meter_label}}}({reads}/{writes} reads/writes)",
+tx: ${{4}}{tx}b/s ${{{meter_label}}}({reads}/{writes} reads/writes)",
         model,
         rx=rx_bytes,
         tx=tx_bytes,
@@ -182,13 +182,11 @@ def show_tasks(model: AppModel):
     kthreads = tasks.get("kernel_threads", 0)
     threads = tasks.get("total_threads", 0) - kthreads
 
-    thread_style = "${8,1}" if model.config["hide_threads"] else "${2,1}"
-    thread_lbl_style = (
-        "${{8}}" if model.config["hide_threads"] else "${{{meter_label}}}"
-    )
-    kthread_style = "${8,1}" if model.config["hide_kthreads"] else "${2,1}"
+    thread_style = "${8,1}" if model.settings.hide_threads else "${2,1}"
+    thread_lbl_style = "${{8}}" if model.settings.hide_threads else "${{{meter_label}}}"
+    kthread_style = "${8,1}" if model.settings.hide_kthreads else "${2,1}"
     kthread_lbl_style = (
-        "${{8}}" if model.config["hide_kthreads"] else "${{{meter_label}}}"
+        "${{8}}" if model.settings.hide_kthreads else "${{{meter_label}}}"
     )
     return add_palette(
         "  ${{{meter_label}}}Tasks: ${{{meter_label},1}}{task_count}"

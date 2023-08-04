@@ -10,13 +10,15 @@ This screen is started when the user decides to quit the application.
 It handles any before-quit events.
 """
 
-import os
 from typing import Any, Callable, Dict
 from asciimatics.screen import Screen
 from asciimatics.widgets import Frame, Layout, TextBox, Button
 from asciimatics.exceptions import StopApplication
+from spydertop.config.cache import get_user_cache
 
 from spydertop.model import AppModel
+from spydertop.state import ExitReason
+from spydertop.utils import is_docker
 from spydertop.widgets import FuncLabel, Padding
 from spydertop.utils.types import ExtendedParser
 
@@ -45,7 +47,7 @@ class QuitFrame(Frame):
         )
 
     def update(self, frame_no):
-        self.set_theme(self._model.config["theme"])
+        self.set_theme(self._model.settings.theme)
         if self._needs_update:
             self.build_feedback_widget()
             self.reset()
@@ -59,15 +61,12 @@ class QuitFrame(Frame):
         self._double_column.clear_widgets()
 
         # quit early if the user has already submitted feedback
-        # or do not have a settings file (i.e. they have not yet installed)
+        # or we are running in docker
         if (
-            self._model.config["has_submitted_feedback"]
+            get_user_cache().get("has_submitted_feedback", False)
             and self._state["enjoyed_spydertop"] is None
-        ) or not os.path.exists(
-            os.path.join(
-                os.environ.get("HOME"), ".spyderbat-api/.spydertop-settings.yaml"  # type: ignore
-            )
-        ):
+        ) or is_docker():
+            self._model.state.exit_reason = ExitReason.QUIT
             raise StopApplication("User Quit and does not need feedback")
 
         self._single_column.add_widget(
@@ -136,8 +135,10 @@ later through the Support and Feedback menu on the help screen.
         )
 
     def _quit(self):
+        self._model.state.exit_reason = ExitReason.QUIT
         raise StopApplication("User Quit without submitting feedback")
 
     def _submit_feedback(self):
+        self._model.state.exit_reason = ExitReason.QUIT
         self._model.submit_feedback(self._state["feedback_text"])
         raise StopApplication("User Quit after submitting feedback")

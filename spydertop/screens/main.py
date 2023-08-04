@@ -10,13 +10,16 @@ The main frame for the tool. This frame contains the record list and usage metri
 as well as showing all the menu buttons.
 """
 
+# pylint: disable=too-many-lines
+
+from copy import deepcopy
 import re
 from typing import Any, Dict, List, Optional
 import urllib.parse
 import webbrowser
 
 import pyperclip
-from asciimatics.screen import Screen
+from asciimatics.screen import Screen, StopApplication
 from asciimatics.widgets import (
     Frame,
     Layout,
@@ -26,6 +29,7 @@ from asciimatics.widgets import (
 from asciimatics.exceptions import NextScene
 from asciimatics.event import KeyboardEvent
 from asciimatics.strings import ColouredText
+from spydertop.config.config import Focus, Settings
 
 from spydertop.model import AppModel
 from spydertop.screens.setup import SetupFrame
@@ -40,10 +44,10 @@ from spydertop.screens.meters import (
     show_uptime,
 )
 from spydertop.screens.modals import InputModal, NotificationModal
+from spydertop.state import ExitReason
 from spydertop.widgets import Table
 from spydertop.utils import (
     align_with_overflow,
-    get_machine_short_name,
     log,
     convert_to_seconds,
     pretty_time,
@@ -70,7 +74,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
     # update and caching management
     _model: AppModel
-    _old_settings: Dict[str, Any]
+    _old_settings: Settings
     _last_frame: int = 0
     _widgets_initialized: bool = False
     needs_screen_refresh: bool = True
@@ -82,18 +86,20 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     _current_columns: List[Column] = PROCESS_COLUMNS
     _old_column_val = None
     _last_effects: int = 1
+    _focuses: List[Focus] = []
 
     # widgets
     _main: Optional[Layout] = None
     _footer: Footer
     _cpus: Dict[str, List[Meter]] = {}
     _tabs: List[Button] = []
+    _tabs_layout: Layout
     _memory: Meter
     _swap: Meter
     _columns: Table
 
     # -- initialization -- #
-    def __init__(self, screen, model: AppModel) -> None:
+    def __init__(self, screen, model: AppModel, focuses: List[Focus]) -> None:
         # pylint: disable=duplicate-code
         super().__init__(
             screen,
@@ -104,9 +110,16 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             name="MainFrame",
         )
         self._model = model
-        self._old_settings = model.config.settings
+        self._old_settings = deepcopy(model.settings)
+        self._old_state = deepcopy(model.state)
 
-        self.set_theme(model.config["theme"])
+        self._focuses = focuses
+
+        for focus in self._focuses:
+            if focus.type == Focus.MACHINE:
+                self._model.selected_machine = focus.value
+
+        self.set_theme(model.settings.theme)
 
     def _init_widgets(self):  # pylint: disable=too-many-statements
         """Initialize the widgets for the main frame. This is separate from the
@@ -125,9 +138,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         )
         header.add_widget(
             FuncLabel(
-                lambda: get_machine_short_name(
-                    self._model.machines[self._model.selected_machine]
-                )
+                lambda: self._model.get_machine_short_name(self._model.selected_machine)
                 if self._model.selected_machine is not None
                 else ""
             ),
@@ -137,21 +148,35 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         # meters
         self._cpus = {}
         cpu_count = 0
-        for machine in self._model.machines.values():
-            cpu_count = machine["machine_cores"]
-            self._cpus[machine["id"]] = []
+        machines_to_show = (
+            [self._model.selected_machine]
+            if self._model.selected_machine is not None
+            else self._model.machines.keys()
+        )
+        for machine_id in machines_to_show:
+            machine = self._model.machines.get(machine_id)
+            if machine is not None:
+                cpu_count = machine["machine_cores"]
+            else:
+                times = self._model.get_value("cpu_time", machine_id)
+                if times is None:
+                    continue
+                cpu_count = len(times.keys().filter(lambda x: x != "cpu"))
+            self._cpus[machine_id] = []
 
             for i in range(0, cpu_count):
                 if i == 0:
                     name = (
                         align_with_overflow(
-                            get_machine_short_name(machine), 20, include_padding=False
+                            self._model.get_machine_short_name(machine_id),
+                            20,
+                            include_padding=False,
                         )
                         + f" {i} "
                     )
                 else:
                     name = f"{i:<3}"
-                self._cpus[machine["id"]].append(
+                self._cpus[machine_id].append(
                     Meter(
                         name,
                         values=[0, 0, 0, 0],
@@ -170,7 +195,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
                     column = 0
                 else:
                     column = 1
-                header.add_widget(self._cpus[machine["id"]][i], column)
+                header.add_widget(self._cpus[machine_id][i], column)
         self._memory = Meter(
             "Mem",
             values=[0, 0, 0, 0],
@@ -223,6 +248,49 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         header.add_widget(Padding(), 1)
 
         ################# Main Table Tabs #######################
+        available_tabs = self._get_available_tabs()
+        self._tabs_layout = Layout(
+            calculate_widths(self.screen.width, [1] * len(available_tabs))
+        )
+        self.add_layout(self._tabs_layout)
+        self._init_tabs()
+
+        ################# Main Table #######################
+        self._main = Layout([1], fill_frame=True)
+        self.add_layout(self._main)
+
+        self._columns = Table(self._model.state, self._model.settings, self._model.tree)
+        self._main.add_widget(self._columns)
+
+        ################# Footer #######################
+
+        status = FuncLabel(
+            lambda: f"{self._model.status}",
+            align=Alignment.RIGHT,
+            parser=ExtendedParser(),
+            color="focus_button",
+        )
+        self._footer = Footer(
+            calculate_widths(self.screen.width, [1] * 10 + [3]), self, [], status
+        )
+        self.add_layout(self._footer)
+        self._switch_buttons("main")
+
+        self.reset()
+        self.fix()
+        self._switch_to_tab(self._model.settings.tab, force=True)
+        self.switch_focus(self._main, 0, 0)
+        self._widgets_initialized = True
+
+        # this is necessary to update the rows in Table, which is needed for _find below
+        self.update(0)
+        for focus in self._focuses:
+            if focus.type == Focus.TAB:
+                self._switch_to_tab(focus.value)
+            elif focus.type == Focus.RECORD:
+                self._columns.find(f"id: {focus.value}")
+
+    def _get_available_tabs(self):
         available_tabs = [
             "Processes",
             "Flags",
@@ -236,11 +304,12 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             if len(getattr(self._model, tab.lower())) == 0:
                 available_tabs.remove(tab)
 
-        tabs_layout = Layout(
-            calculate_widths(self.screen.width, [1] * len(available_tabs))
-        )
+        return available_tabs
+
+    def _init_tabs(self):
+        available_tabs = self._get_available_tabs()
         self._tabs = []
-        self.add_layout(tabs_layout)
+        self._tabs_layout.clear_widgets()
         for i, name in enumerate(available_tabs):
 
             def wrapper(name):
@@ -251,44 +320,21 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
             button = Button(name, wrapper(name), add_box=False)
             self._tabs.append(button)
-            tabs_layout.add_widget(button, i)
+            self._tabs_layout.add_widget(button, i)
 
-        if self._model.config["tab"] not in [t.lower() for t in available_tabs]:
+        if self._model.settings.tab not in [t.lower() for t in available_tabs]:
             if len(available_tabs) == 0:
                 self._model.fail("No records of were found.")
                 raise NextScene("Failure")
-            self._model.config["tab"] = available_tabs[0].lower()
-
-        ################# Main Table #######################
-        self._main = Layout([1], fill_frame=True)
-        self.add_layout(self._main)
-
-        self._columns = Table(self._model, self._model.tree)
-        self._main.add_widget(self._columns)
-
-        ################# Footer #######################
-
-        status = FuncLabel(
-            lambda: f"{self._model.state}",
-            align=Alignment.RIGHT,
-            parser=ExtendedParser(),
-            color="focus_button",
-        )
-        self._footer = Footer(
-            calculate_widths(self.screen.width, [1] * 10 + [3]), self, [], status
-        )
-        self.add_layout(self._footer)
-        self._switch_buttons("main")
-
+            self._model.settings.tab = available_tabs[0].lower()
+        self._switch_to_tab(self._model.settings.tab, force=False)
         self.reset()
         self.fix()
-        self._switch_to_tab(self._model.config["tab"], force=True)
-        self.switch_focus(self._main, 0, 0)
-        self._widgets_initialized = True
 
     # -- overrides -- #
     def update(self, frame_no):  # pylint: disable=too-many-branches,too-many-statements
-        conf = self._model.config
+        settings = self._model.settings
+        state = self._model.state
         assert self.scene is not None, "Frame must be added to a scene before updating"
 
         # if model is in failure state, raise next scene
@@ -300,15 +346,19 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         if not self._widgets_initialized:
             self._init_widgets()
 
+        # ensure that the table is always in sync with the model
+        if self._columns.tree is not self._model.tree:
+            self._columns.tree = self._model.tree
+
         # update model (if needed, at most 4 times per second)
-        if conf["play"] and (frame_no % max(int(20 / conf["play_speed"]), 5) == 0):
+        if state.play and (frame_no % max(int(20 / settings.play_speed), 5) == 0):
             if self._last_frame != 0:
                 frames_delta = frame_no - self._last_frame
                 time_delta = frames_delta / 20
-                new_time = self._model.timestamp + time_delta * conf["play_speed"]
+                new_time = self._model.timestamp + time_delta * settings.play_speed
                 if not self._model.is_loaded(new_time):
                     # stop playing and notify user
-                    conf["play"] = False
+                    state.play = False
                     self.scene.add_effect(
                         NotificationModal(
                             self.screen,
@@ -324,42 +374,56 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             self._last_frame = frame_no
 
         # detect changes in settings
-        if conf.settings_changed:
-            conf.settings_changed = False
+        if self._old_settings != settings:
             self.needs_update = True
-            if conf["theme"] != self._old_settings["theme"]:
-                self.set_theme(conf["theme"])
+            if settings.theme != self._old_settings.theme:
+                self.set_theme(settings.theme)
                 # update theme colors in tabs
                 for button in self._tabs:
                     if "tab" in self.palette:
                         button.custom_colour = (
                             "selected_tab"
-                            if self._model.config["tab"] == button.text.lower()
+                            if self._model.settings.tab == button.text.lower()
                             else "tab"
                         )
                     else:
                         button.custom_colour = (
                             "selected_focus_field"
-                            if self._model.config["tab"] == button.text.lower()
+                            if self._model.settings.tab == button.text.lower()
                             else "focus_field"
                         )
                 self.needs_screen_refresh = True
 
-            if conf["utc_time"] != self._old_settings["utc_time"]:
+            if settings.utc_time != self._old_settings.utc_time:
                 self.needs_recalculate = True
 
-            self._footer.change_button_text(
-                "Play" if self._model.config["play"] else "Pause",
-                "Play" if not self._model.config["play"] else "Pause",
-            )
             self.fix()
             self.needs_screen_refresh = True
             if (
-                conf["hide_threads"] != self._old_settings["hide_threads"]
-                or conf["hide_kthreads"] != self._old_settings["hide_kthreads"]
-            ) and self._model.config["tab"] == "processes":
+                settings.hide_threads != self._old_settings.hide_threads
+                or settings.hide_kthreads != self._old_settings.hide_kthreads
+            ) and self._model.settings.tab == "processes":
                 self.needs_recalculate = True
-            self._old_settings = self._model.config.settings.copy()
+            if settings.collapse_tree != self._old_settings.collapse_tree:
+                self._model.rebuild_tree()
+                self._columns.tree = self._model.tree
+            self._old_settings = deepcopy(self._model.settings)
+
+        # detect changes in state
+        if self._old_state != state:
+            if state.play != self._old_state.play:
+                self._footer.change_button_text(
+                    "Play" if self._model.state.play else "Pause",
+                    "Play" if not self._model.state.play else "Pause",
+                )
+            if (
+                state.sort_ascending != self._old_state.sort_ascending
+                or state.sort_column != self._old_state.sort_column
+            ):
+                self.needs_recalculate = True
+            if state.filter != self._old_state.filter:
+                self.needs_update = True
+            self._old_state = deepcopy(state)
 
         # update columns if needed
         if self._model.columns_changed:
@@ -376,7 +440,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             # work up the caching system, updating each part of the cache
             # only if necessary
             if self.needs_recalculate:
-                self._build_options(getattr(self._model, self._model.config["tab"]))
+                self._init_tabs()
+                self._build_options(getattr(self._model, self._model.settings.tab))
                 self.needs_recalculate = False
                 self.needs_update = True
 
@@ -454,7 +519,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             if event.key_code in {Screen.KEY_TAB, Screen.KEY_BACK_TAB}:
                 current_tab_index = 0
                 for i, tab in enumerate(self._tabs):
-                    if tab.text.lower() == self._model.config["tab"]:
+                    if tab.text.lower() == self._model.settings.tab:
                         current_tab_index = i
                         break
                 offset = 1 if event.key_code == Screen.KEY_TAB else -1
@@ -490,6 +555,9 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             return
 
         for record in records.values():
+            # exlude records that are not in the selected_machine
+            if "muid" in record and record["muid"] != self._model.selected_machine:
+                continue
             # determine if the record is visible for this time
             if "valid_from" in record:
                 if record["valid_from"] > self._model.timestamp or (
@@ -506,10 +574,10 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
                     continue
 
             # ignore if the record is a process and it is hidden
-            if self._model.config["tab"] == "processes" and (
-                self._model.config["hide_kthreads"]
+            if self._model.settings.tab == "processes" and (
+                self._model.settings.hide_kthreads
                 and record["type"] == "kernel thread"
-                or self._model.config["hide_threads"]
+                or self._model.settings.hide_threads
                 and record["type"] == "thread"
             ):
                 continue
@@ -529,7 +597,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     def _enable_disable(self):
         """find the currently selected row and enable/disable that
         branch in the model.tree"""
-        if self._model.config["tab"] != "processes":
+        if self._model.settings.tab != "processes":
             return
         row = self._columns.get_selected()
         if row is None:
@@ -602,6 +670,10 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     def _switch_to_tab(self, tab_name: str, force: bool = False):
         """Switch to the given tab, and update the state accordingly"""
 
+        available_tabs = self._get_available_tabs()
+        if tab_name not in [s.lower() for s in available_tabs]:
+            return
+
         # update tabs colors
         for button in self._tabs:
             if "tab" in self.palette:
@@ -617,13 +689,13 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self.needs_screen_refresh = True
 
         # update state
-        if tab_name == self._model.config["tab"] and not force:
+        if tab_name == self._model.settings.tab and not force:
             return
-        self._model.config["tab"] = tab_name
+        self._model.settings.tab = tab_name
         self._columns.value = 0
         self.needs_recalculate = True
-        self._model.config["sort_column"] = None
-        self._model.config["filter"] = None
+        self._model.state.sort_column = None
+        self._model.state.filter = ""
         self._cached_options = None
         self._cached_sortable = []
 
@@ -632,36 +704,33 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         # update columns and sort
         if tab_name == "processes":
             self._current_columns = PROCESS_COLUMNS
-            self._model.config["sort_column"] = "CPU%"
-            self._model.config["sort_ascending"] = False
-            self._model.config["tree"] = self._model.config["tree_enabled"]
-        else:
-            self._model.config["tree"] = False
+            self._model.state.sort_column = "CPU%"
+            self._model.state.sort_ascending = False
 
         if tab_name == "sessions":
             self._current_columns = SESSION_COLUMNS
-            self._model.config["sort_column"] = "I"
-            self._model.config["sort_ascending"] = False
+            self._model.state.sort_column = "I"
+            self._model.state.sort_ascending = False
 
         if tab_name == "flags":
             self._current_columns = FLAG_COLUMNS
-            self._model.config["sort_column"] = "AGE"
-            self._model.config["sort_ascending"] = True
+            self._model.state.sort_column = "AGE"
+            self._model.state.sort_ascending = True
 
         if tab_name == "connections":
             self._current_columns = CONNECTION_COLUMNS
-            self._model.config["sort_column"] = "DURATION"
-            self._model.config["sort_ascending"] = True
+            self._model.state.sort_column = "DURATION"
+            self._model.state.sort_ascending = True
 
         if tab_name == "listening":
             self._current_columns = LISTENING_SOCKET_COLUMNS
-            self._model.config["sort_column"] = "DURATION"
-            self._model.config["sort_ascending"] = True
+            self._model.state.sort_column = "DURATION"
+            self._model.state.sort_ascending = True
 
         if tab_name == "containers":
             self._current_columns = CONTAINER_COLUMNS
-            self._model.config["sort_column"] = "CREATED"
-            self._model.config["sort_ascending"] = False
+            self._model.state.sort_column = "CREATED"
+            self._model.state.sort_ascending = False
 
     def _show_sort_menu(self):
         """show the sort menu"""
@@ -670,7 +739,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
         def set_sort(title):
             log.info(f"Switching sort to: {title}")
-            self._model.config["sort_column"] = title
+            self._model.state.sort_column = title
 
         menu = InputModal(
             self.screen,
@@ -680,9 +749,9 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             ],
             on_submit=set_sort,
             widget=ListBox,
-            theme=self._model.config["theme"],
+            theme=self._model.settings.theme,
             height=len(self._current_columns),
-            value=self._model.config["sort_column"],
+            value=self._model.state.sort_column,
             on_death=lambda: self._switch_buttons("main"),
         )
         assert self.scene is not None, "A scene must be set in the frame before use"
@@ -704,7 +773,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             InputModal(
                 self.screen,
                 label="Search:",
-                theme=self._model.config["theme"],
+                theme=self._model.settings.theme,
                 on_change=run_search,
                 on_death=lambda: self._switch_buttons("main"),
                 validator=self._columns.find,
@@ -728,7 +797,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             InputModal(
                 self.screen,
                 label="Custom Time Offset:",
-                theme=self._model.config["theme"],
+                theme=self._model.settings.theme,
                 on_submit=lambda value: self._shift_time(convert_to_seconds(value)),
                 validator=validator,
                 on_death=lambda: self._switch_buttons("time"),
@@ -741,15 +810,15 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         self._switch_buttons("modal")
 
         def set_filter(value):
-            self._model.config["filter"] = value
+            self._model.state.filter = value
 
         assert self.scene is not None, "A scene must be set in the frame before use"
         self.scene.add_effect(
             InputModal(
                 self.screen,
-                self._model.config["filter"],
+                self._model.state.filter,
                 label="Filter:",
-                theme=self._model.config["theme"],
+                theme=self._model.settings.theme,
                 on_change=set_filter,
                 on_death=lambda: self._switch_buttons("main"),
             )
@@ -768,7 +837,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             record = self._model.get_record_by_id(row[1][0]) or {}
             source = record.get("muid", None)
 
-        if not row or not self._model.config.org or not source:
+        if not row or not self._model.state.org_uid or not source:
             log.info("No row selected or no org/machine/input. Skipping URL")
             assert self.scene is not None, "A scene must be set in the frame before use"
             self.scene.add_effect(
@@ -782,7 +851,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             )
             return
 
-        url = f"https://app.spyderbat.com/app/org/{self._model.config.org}\
+        url = f"https://app.spyderbat.com/app/org/{self._model.state.org_uid}\
 /source/{source}/spyder-console?ids={urllib.parse.quote(str(row[1][0]))}"
 
         # try to open the url in the browser and copy it to the clipboard
@@ -858,7 +927,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
     def _play(self):
         """Update the model to play"""
         self._model.log_api(API_LOG_TYPES["navigation"], {"button": "play"})
-        self._model.config["play"] = not self._model.config["play"]
+        self._model.state.play = not self._model.state.play
 
     def _shift_time(self, offset: float):
         """Shift the time in Model by a given amount."""
@@ -908,28 +977,22 @@ Some information displayed may not be accurate\
 
     def _config(self, name: str, value=None):
         """Change a config value, and handle any effects"""
-        if name == "tree":
-            self._model.config["tree_enabled"] = (
-                value or not self._model.config["tree_enabled"]
+        if hasattr(self._model.state, name):
+            setattr(
+                self._model.state, name, value or not getattr(self._model.state, name)
             )
-            self._model.config[name] = (
-                self._model.config["tree_enabled"]
-                and self._model.config["tab"] == "processes"
+        elif hasattr(self._model.settings, name):
+            setattr(
+                self._model.settings,
+                name,
+                value or not getattr(self._model.settings, name),
             )
-            return
-
-        value = value or not self._model.config[name]
-        self._model.config[name] = value
-
-        if name == "collapse_tree":
-            self._model.rebuild_tree()
-            self._columns.tree = self._model.tree
 
     # -- moving to other frames -- #
     def _back(self):
         """Move back to configuring sources"""
         # don't go back if the input is from a file
-        if not isinstance(self._model.config.input, str):
+        if not self._model.is_loading_from_api():
             assert self.scene is not None, "A scene must be set in the frame before use"
             self.scene.add_effect(
                 NotificationModal(
@@ -941,11 +1004,12 @@ Some information displayed may not be accurate\
             )
             return
         self._model.log_api(API_LOG_TYPES["navigation"], {"button": "back"})
-        self._model.config.source_confirmed = False
-        self._model.config.start_time = None
-        self._model.config["play"] = False
+        self._model.state.source_uid = None
+        self._model.state.time = None
+        self._model.state.play = False
+        self._model.state.exit_reason = ExitReason.BACK_TO_CONFIG
         self._switch_to_tab("processes")
-        raise NextScene("Config")
+        raise StopApplication("User is going back to the config screen")
 
     def _help(self):
         """Show the help screen"""

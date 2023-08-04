@@ -18,11 +18,13 @@ docker run -it spyderbat/spydertop
 docker run -it spyderbat/spydertop -i examples/minikube-sock-shop.json.gz
 
 # to persist settings, or to use a pre-configured Spyderbat API
-docker run -it -v $HOME/.spyderbat-api:/root/.spyderbat-api spyderbat/spydertop [ARGS]
+docker run -it -v $HOME/.config/spydertop:/root/.config/spydertop spyderbat/spydertop [ARGS]
 
 # to run docker with the host's timezone settings
 docker run -it -v /etc/localtime:/etc/localtime spyderbat/spydertop [ARGS]
 ```
+
+You can also download the bundled executable from the [releases page](https://github.com/spyderbat/spydertop/releases), which includes everything necessary to run spydertop, including a compatible python version!
 
 ## Installation
 
@@ -42,13 +44,7 @@ pip install .
 # pip install . -e # for editable install
 ```
 
-On your first run of `spydertop`, it will guide you through setting up a configuration if you do not have one already. If you prefer to set it up yourself, see [Configuration](#configuration). Your organization id can be found in the url for the dashboard, and many other pages:
-
-```url
-https://api.spyderbat.com/app/org/{ORG_ID_HERE}/dashboard
-```
-
-Similarly, the machine id can be located in the url of an investigation, or by enabling the id column in the sources list.
+On your first run of `spydertop`, it will guide you through setting up a basic configuration if you do not have one already. If you prefer to set it up yourself, see [Configuration](#configuration).
 
 ## Usage
 
@@ -63,31 +59,48 @@ spydertop --help # print usage information
 
 # starts spydertop with the specified machine
 # at a point in time 5 days ago
-spydertop -g ORGUID -m MACHINEUID -- -5d
+spydertop load -g ORGUID -m MACHINEUID -- -5d
 
 # full example
-spydertop \
+spydertop load \
         --organization ORGUID \
         --machine MACHINEUID \
         --duration 3m \
         --input cached_input_records.json.gz \
         --output file_to_save_to.json.gz \
-        --log-level WARN \
-        --no-confirm \
         -- 1654303663.600901
 ```
 
 ## Configuration
 
-Spydertop uses the Spyderbat APIs, so it must have access to a valid API key, usually stored in a configuration file, as shown below. This configuration file is automatically created the first time you run spydertop, but can be edited manually at any time. API keys can be obtained from the API keys page under your Spyderbat account.
+The current configuration, and it's location on disk, can be viewed with
 
-```yaml
-# File: ~/.spyderbat-api/config.yaml
-default:
-    api_key: API_KEY
-    org:     DEFAULT_ORG_ID     # optional
-    machine: DEFAULT_MACHINE_ID # optional
-    api_url: api.spyderbat.com  # optional
+```bash
+spydertop config get
+```
+
+Spydertop uses the Spyderbat APIs, so it must have access to a valid API key. API keys can be obtained from the API keys page under your Spyderbat account, and configured in spydertop using the `spydertop config set-secret` command:
+
+```bash
+spydertop config set-secret --name mysecret --api-key $(cat ./apikey.txt)
+```
+
+When using the `load` command, spydertop uses a *context* to determine how to load data. By default, you will ahve to specify the organization and source every time you start spydertop. However, you can update or create a new context to configure default values:
+
+```bash
+spydertop config set-context --name mycontext --secret mysecret --organization ORG_ID --source SOURCE_ID
+```
+
+Your organization id can be found in the url for the dashboard, and many other pages. Similarly, the machine id can be located in the url of an investigation, or by enabling the id column in the sources list.
+
+```url
+https://api.spyderbat.com/app/org/{ORG_ID_HERE}/dashboard
+```
+
+After creating a context, you can enable it with:
+
+```bash
+spydertop config use-context mycontext
 ```
 
 ## Development

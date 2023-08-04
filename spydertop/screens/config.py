@@ -10,15 +10,14 @@ The configuration frame handles guiding the user through finishing setup or fill
 the information missing from the configuration file.
 """
 
-import os
+from dataclasses import dataclass
+from enum import Enum
 import fnmatch
 import re
-from time import sleep
 from threading import Thread
-from datetime import datetime, time, timedelta, timezone, tzinfo
-from typing import Any, Callable, List, Optional, Union
+from datetime import datetime, timedelta, timezone
+from typing import Callable, List, Optional, TextIO
 
-import yaml
 from asciimatics.widgets import (
     Frame,
     Text,
@@ -27,15 +26,19 @@ from asciimatics.widgets import (
     Label,
     DatePicker,
     TimePicker,
-    CheckBox,
 )
 from asciimatics.screen import Screen
 from asciimatics.event import KeyboardEvent
-from asciimatics.exceptions import NextScene, StopApplication
+from asciimatics.exceptions import StopApplication
+from spydertop.config import DEFAULT_API_URL
 
-from spydertop.config import Config
+from spydertop.config.config import Config, Context
+from spydertop.config.secrets import Secret
 from spydertop.constants.columns import Column
 from spydertop.model import AppModel
+from spydertop.recordpool import RecordPool
+from spydertop.state import ExitReason, State
+from spydertop.utils.types import APIError, LoadArgs
 from spydertop.widgets import FuncLabel, Padding
 from spydertop.utils import (
     get_timezone,
@@ -46,19 +49,54 @@ from spydertop.constants import API_LOG_TYPES, COLOR_REGEX
 from spydertop.widgets.table import Table
 
 
+@dataclass
+class ConfigState:  # pylint: disable=too-many-instance-attributes
+    """State for the configuration frame"""
+
+    duration: timedelta
+    has_account: Optional[bool] = None
+    api_key: Optional[str] = None
+    source_glob: Optional[str] = None
+    looking_for_sources: bool = False
+    force_reload: bool = False
+    created_account: bool = False
+    notification: Optional[str] = None
+    failure_reason: Optional[str] = None
+
+
+class ConfigStep(Enum):
+    """Enum for the different configuration steps"""
+
+    HAS_ACCOUNT = 0
+    API_KEY = 1
+    ORGANIZATION = 2
+    SOURCE = 3
+    TIME = 4
+    FINISH = -1
+
+
 class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
     """Frame for initial configuration of the application
     to prepare for API access. This frame has several views,
     and switches between them by clearing the layout and rebuilding it."""
 
     config: Config
-    model: AppModel
+    state: State
+    recordpool: Optional[RecordPool] = None
 
     thread: Optional[Thread] = None
+    cache: ConfigState
     _on_submit: Optional[Callable] = None
     _needs_build: bool = True
+    _ouptut: Optional[TextIO]
 
-    def __init__(self, screen: Screen, model: AppModel) -> None:
+    def __init__(
+        self,
+        screen: Screen,
+        config: Config,
+        state: State,
+        args: LoadArgs,
+    ) -> None:
         super().__init__(  # pylint: disable=duplicate-code
             screen,
             screen.height,
@@ -68,37 +106,54 @@ class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
             name="Configuration",
         )
 
-        self.config = model.config
-        self.model = model
+        self.config = config
+        self.state = state
+        self.args = args
 
-        self.cache, self.set_cache = model.use_state(
+        self.cache = self.state.use_state(
             str(self._name),
-            {
-                "has_account": None,  # Optional[bool]
-                "orgs": None,  # Optional[List]
-                "sources": None,  # Optional[List]
-                "source_glob": None,  # Optional[str]
-                "looking_for_sources": False,  # bool
-                "force_reload": False,  # bool
-                "needs_saving": False,  # bool
-                "created_account": False,  # bool
-                "notification": None,  # Optional[str]
-            },
+            ConfigState(
+                duration=timedelta(minutes=config.settings.default_duration_minutes)
+            ),
         )
+
+        # set up information that is already in config or args
+        if self.config.active_context is not None:
+            context = self.config.contexts[self.config.active_context]
+            secret = context.get_secret(config.directory)
+            if secret is not None:
+                self.set_api_key(secret.api_key, secret.api_url)
+                self.cache.has_account = True
+            self.state.org_uid = context.org_uid or ""
+            self.state.source_uid = context.source
+            if context.time is not None:
+                import dateparser  # pylint: disable=import-outside-toplevel
+
+                self.state.time = dateparser.parse(context.time)
+                log.log("parsing time:", context, self.state.time)
+
+        if self.args.source is not None:
+            if "*" in self.args.source:
+                self.cache.source_glob = self.args.source
+                self.state.source_uid = None
+            else:
+                self.state.source_uid = self.args.source
+
+        self.cache.duration = args.duration or timedelta(
+            minutes=config.settings.default_duration_minutes
+        )
+        self.state.time = args.timestamp or self.state.time
+
+        self.state.org_uid = self.args.organization or self.state.org_uid
 
         self.layout = Layout([1, 6, 1], fill_frame=True)
         self.add_layout(self.layout)
         self.footer = Layout([1, 3, 3, 1])
         self.add_layout(self.footer)
 
-        self.set_theme(self.config["theme"])
+        self.set_theme(self.config.settings.theme)
 
     def update(self, frame_no):
-        if not self._needs_build and self.model.loaded:
-            # we have returned from Main, reset state
-            self._needs_build = True
-            self.model.clear()
-
         if self._needs_build:
             if self.thread:
                 self.thread.join()
@@ -121,15 +176,30 @@ class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
                     self._on_submit = None
         return super().process_event(event)
 
-    def build_next_layout(  # pylint: disable=too-many-branches,too-many-statements,too-many-return-statements
+    def _pick_current_step(self) -> ConfigStep:
+        """Determines which step of the configuration process to display next"""
+        if not self.cache.has_account:
+            return ConfigStep.HAS_ACCOUNT
+        if self.cache.api_key is None:
+            return ConfigStep.API_KEY
+        if self.state.org_uid == "":
+            return ConfigStep.ORGANIZATION
+        if self.state.source_uid is None:
+            return ConfigStep.SOURCE
+        if self.state.time is None:
+            return ConfigStep.TIME
+        return ConfigStep.FINISH
+
+    def build_next_layout(  # pylint: disable=too-many-branches,too-many-statements,too-many-locals,too-many-return-statements
         self,
     ) -> None:
         """Determines which layout to display next based on the state of the config"""
-
         self._needs_build = False
         self._on_submit = None
         self.layout.clear_widgets()
         self.footer.clear_widgets()
+
+        current_step = self._pick_current_step()
 
         # add padding which is 20% of the height of the screen (without the title)
         self.layout.add_widget(Padding(max(int(self.screen.height * 0.2) - 2, 0)), 1)
@@ -144,57 +214,70 @@ class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
         )
 
         # if the model failed to load, display the error message
-        if self.model.failed:
-            if "403" in self.model.failure_reason:
-
-                def on_continue():
-                    self.config.api_key = None
-                    self.model.failed = False
-                    self.model.failure_reason = ""
-
-                self.build_instructions(
-                    "Your API key is invalid. \
-Please make sure you entered it correctly.",
-                    on_continue,
-                )
-                return
-            self.build_error(self.model.failure_reason)
+        if self.cache.failure_reason is not None:
+            self.build_error(self.cache.failure_reason or "Unknown error")
             return
 
         # if there is a notification, display it
-        if self.cache["notification"] is not None:
+        if self.cache.notification is not None:
             self.build_instructions(
-                self.cache["notification"], lambda: self.set_cache(notification=None)
+                self.cache.notification,
+                lambda: setattr(self.cache, "notification", None),
             )
             return
 
         # if the config is complete, display the main screen
-        if self.config.is_complete:
-            if self.cache["needs_saving"] and not self.config.has_config_file:
-                self.build_config_save()
-                return
-            log.info("Config is complete, starting load")
-            log.info(self.config)
-            self.model.init()
-            raise NextScene("Loading")
+        if current_step == ConfigStep.FINISH:
+            assert self.recordpool is not None
 
-        # if there is no api_key, determine if the user has an account,
-        # and then help them find the api_key
-        if self.config.api_key is None:
-            self.set_cache(needs_saving=True)
-            if self.cache["has_account"] is None:
+            if self.cache.created_account:
+                # create a temporary model to log the account creation
+                model = AppModel(
+                    self.config.settings,
+                    self.state,
+                    self.recordpool,
+                )
+                model.log_api(
+                    API_LOG_TYPES["account_created"],
+                    {"orgId": self.state.org_uid or ""},
+                )
+            # update the configuration if the user does not have one complete
+            if len(self.config.contexts) == 0:
+                secrets = Secret.get_secrets(self.config.directory)
+                if not self.cache.api_key in [s.api_key for s in secrets.values()]:
+                    assert isinstance(self.recordpool.input_, Secret)
+                    secrets["default"] = self.recordpool.input_
+                    Secret.set_secrets(self.config.directory, secrets)
+
+                self.config.contexts["default"] = Context(
+                    secret_name="default",
+                    org_uid=None,
+                    source=None,
+                )
+                self.config.active_context = "default"
+            log.info("Config is complete, starting load")
+            raise StopApplication("Finished configuration")
+
+        if current_step == ConfigStep.HAS_ACCOUNT:
+            if self.cache.has_account is None:
+
+                def callback1(confirmed):
+                    self.cache.has_account = confirmed
+                    self._needs_build = True
+
                 self.build_confirm(
                     "Do you have a Spyderbat account?",
-                    lambda confirmed: self.set_state("has_account", confirmed),
+                    callback1,
                 )
                 return
-            if not self.cache["has_account"]:
 
-                def on_next():
-                    self.set_cache(created_account=True, has_account=True)
+            def callback():
+                self.cache.has_account = True
+                self.cache.created_account = True
+                self._needs_build = True
 
-                self.build_instructions(
-                    """\
+            self.build_instructions(
+                """\
 You need a Spyderbat account to use Spydertop, otherwise I won't \
 have any data to display! Please go to https://app.spyderbat.com/signup \
 and create an account, then come back here to continue.
@@ -203,233 +286,157 @@ If you want to try out Spydertop without an account, you can use one \
 of the example files (included in the docker image as well as the source \
 repository) like so:
 
-    $ spydertop -i examples/minikube-sock-shop.json.gz
+$ spydertop -i examples/minikube-sock-shop.json.gz
 
 """,
-                    on_next,
-                )
-                return
-            if self.cache["has_account"]:
-                self.build_api_key_question()
-                return
+                callback,
+            )
+            return
 
-        self.model.init_api()
+        if current_step == ConfigStep.API_KEY:
+            self.build_api_key_question()
+            return
 
         # if the config has no org, ask the user to select one
-        if not self.config.org_confirmed or self.config.org is None:
-            self.set_cache(needs_saving=self.config.org is None)
+        if current_step == ConfigStep.ORGANIZATION:
+            assert self.recordpool is not None
             # if there are no orgs, load the orgs
-            if self.cache["orgs"] is None:
-
-                def load_orgs():
-                    orgs = self.model.get_orgs(force_reload=self.cache["force_reload"])
-                    if orgs is not None:
-                        self.set_cache(
-                            orgs=[
-                                org
-                                for org in orgs
-                                # the defend the flag org is not useful for the user
-                                if org["uid"] != "defend_the_flag"
-                            ]
-                        )
-                    self.trigger_build()
-                    self._screen.force_update()
-                    self.set_cache(force_reload=False)
-
-                self.thread = Thread(target=load_orgs)
-                self.thread.start()
+            if len(self.recordpool.orgs) == 0:
+                self.load_data("orgs")
                 self.build_loading("Loading organizations...")
                 return
 
             # if there are orgs, determine how many, and pick one
-            if self.cache["orgs"] is not None:
-                if len(self.cache["orgs"]) == 0:
-                    self.build_error(
-                        """\
-No organizations found! This is unexpected; try \
-logging into your account on the website.\
-"""
-                    )
-                    return
-                if len(self.cache["orgs"]) == 1:
-                    self.set_org(self.cache["orgs"][0])
-                if len(self.cache["orgs"]) > 1:
-                    orgs = sorted(
-                        self.cache["orgs"],
-                        key=lambda o: o.get("total_sources", 0),
-                        reverse=True,
-                    )
+            if len(self.recordpool.orgs) == 1:
+                self.state.org_uid = self.recordpool.orgs[0]["id"]
+                self._needs_build = True
+                return
+            if len(self.recordpool.orgs) > 1:
+                orgs = sorted(
+                    self.recordpool.orgs,
+                    key=lambda o: o.get("total_sources", 0),
+                    reverse=True,
+                )
 
-                    if self.config.org is None:
-                        index = 0
-                    else:
-                        try:
-                            index = [o["uid"] for o in orgs].index(self.config.org)
-                        except ValueError:
-                            index = 0
+                def reload_orgs():
+                    self.cache.force_reload = True
+                    self._on_submit = None
+                    self._needs_build = True
 
-                    def reload_orgs():
-                        self.set_cache(force_reload=True)
-                        self.set_cache(orgs=None)
-                        self._on_submit = None
-                        self.trigger_build()
+                def org_callback(row):
+                    if row is None:
+                        return
+                    self.state.org_uid = row[4]
+                    self._needs_build = True
 
-                    self.build_question(
-                        "Please select an organization",
+                self.build_question(
+                    "Please select an organization",
+                    [
                         [
-                            [
-                                org["name"],
-                                f"Sources: {org['total_sources']}"
-                                if "total_sources" in org
-                                else "",
-                                str(org.get("owner_email", "")),
-                                ", ".join(org["tags"]) if "tags" in org else "",
-                                org["uid"],
-                            ]
-                            for org in orgs
-                        ],
-                        lambda row: self.set_org(row[4]) if row is not None else None,
-                        index,
-                        refresh_button=reload_orgs,
-                    )
-                    return
-
-        # if the config source has asterisks, then it is a glob, and we need to
-        # ask the user to select one of the sources that match
-        if self.config.machine is not None and "*" in self.config.machine:
-            self.set_cache(source_glob=self.config.machine)
-            self.config.source_confirmed = False
-            self.config.machine = None
-
-        if self.cache["created_account"]:
-            self.model.log_api(
-                API_LOG_TYPES["account_created"], {"orgId": self.config.org or ""}
-            )
-            # prevent this log from being sent again
-            self.set_cache(created_account=False)
+                            org["name"],
+                            f"Sources: {org['total_sources']}"
+                            if "total_sources" in org
+                            else "",
+                            str(org.get("owner_email", "")),
+                            ", ".join(org["tags"]) if "tags" in org else "",
+                            org["uid"],
+                        ]
+                        for org in orgs
+                    ],
+                    org_callback,
+                    0,
+                    refresh_button=reload_orgs,
+                )
+                return
 
         # if the config has no source, ask the user to select one
-        if not self.config.source_confirmed or self.config.machine is None:
+        if current_step == ConfigStep.SOURCE:
+            assert self.recordpool is not None
             # if the sources have not been loaded, load the sources
-            if self.cache["sources"] is None:
-
-                def load_sources():
-                    sources = self.model.get_sources(
-                        force_reload=self.cache["force_reload"]
-                    )
-                    clusters = self.model.get_clusters(
-                        force_reload=self.cache["force_reload"]
-                    )
-                    self.set_cache(force_reload=False)
-                    if sources is None and clusters is None:
-                        self.model.fail("Failed to load any machines or clusters")
-                        self.trigger_build()
-                        self._screen.force_update()
-                        return
-                    if self.cache["looking_for_sources"] and sources is not None:
-                        if len(sources) == 0:
-                            sleep(1)
-                            load_sources()
-                            return
-                    self.set_cache(
-                        sources=[
-                            source
-                            for source in (sources or [])
-                            # the global source is not useful in this context
-                            if not source["uid"].startswith("global:")
-                        ],
-                        clusters=clusters or [],
-                    )
-                    self.trigger_build()
-                    self._screen.force_update()
-
-                self.thread = Thread(target=load_sources)
-                self.thread.start()
+            if self.state.org_uid not in self.recordpool.sources:
+                self.load_data("sources")
                 self.build_loading(
                     "Loading sources..."
-                    if not self.cache["looking_for_sources"]
+                    if not self.cache.looking_for_sources
                     else "Looking for sources..."
                 )
                 return
 
+            sources = self.recordpool.sources.get(self.state.org_uid, [])
+            clusters = self.recordpool.clusters.get(self.state.org_uid, [])
             # if there are no sources, guide the user through creating one
-            if self.cache["sources"] == [] and self.cache["clusters"] == []:
-                self.set_cache(needs_saving=True, sources=None)
+            if len(sources) == 0 and len(clusters) == 0:
                 self.build_instructions(
                     f"""\
 You don't have any sources yet. You can create one by going to \
-https://app.spyderbat.com/app/org/{self.config.org}/first-time-config and \
+https://app.spyderbat.com/app/org/{self.state.org_uid}/first-time-config and \
 following the instructions. \
 Once you have a source configured, you can continue.\
 """,
-                    lambda: self.set_state("looking_for_sources", True),
+                    lambda: setattr(self.cache, "looking_for_sources", True),
                 )
                 return
 
             # if there are sources, pick one
-            if self.cache["sources"]:
+            if sources:
                 # if there is a glob, remove non-matching sources
-                sources = self.cache["sources"]
-                if self.cache["source_glob"]:
+                if self.cache.source_glob:
                     sources = [
                         s
-                        for s in self.cache["sources"]
-                        if fnmatch.fnmatch(s["name"], self.cache["source_glob"])
-                        or fnmatch.fnmatch(s["uid"], self.cache["source_glob"])
+                        for s in sources
+                        if fnmatch.fnmatch(s["name"], self.cache.source_glob)
+                        or fnmatch.fnmatch(s["uid"], self.cache.source_glob)
                         or (
                             "description" in s
                             and fnmatch.fnmatch(
                                 s["description"],
-                                self.cache["source_glob"],
+                                self.cache.source_glob,
                             )
                         )
                     ]
                     if len(sources) == 0:
                         self.build_instructions(
-                            f"No sources matched '{self.cache['source_glob']}'",
-                            lambda: self.set_cache(source_glob=None),
+                            f"No sources matched '{self.cache.source_glob}'",
+                            lambda: setattr(self.cache, "source_glob", None),
                         )
                         return
                     if len(sources) == 1:
-                        self.set_source(sources[0]["uid"])
+                        self.state.source_uid = sources[0]["uid"]
                         self._needs_build = True
                         self._screen.force_update()
                         return
 
-                self.set_cache(needs_saving=True)
                 # sort the sources by the last time they were seen
                 sources = sorted(
-                    self.cache["sources"],
+                    sources,
                     key=lambda s: s.get("last_stored_chunk_end_time", 0),
                     reverse=True,
                 )
-                if self.config.machine is None:
-                    index = 0
-                else:
-                    try:
-                        index = [s["uid"] for s in sources].index(self.config.machine)
-                    except ValueError:
-                        index = 0
 
                 def back_handler():
-                    self.config.org_confirmed = False
-                    self.config.source_confirmed = False
+                    self.state.org_uid = ""
+                    self.state.source_uid = None
                     self._on_submit = None
-                    self.trigger_build()
+                    self._needs_build = True
 
                 def refresh_handler():
-                    self.set_cache(force_reload=True)
-                    self.config.source_confirmed = False
-                    self.set_cache(sources=None)
+                    self.cache.force_reload = True
+                    self.state.source_uid = None
                     self._on_submit = None
-                    self.trigger_build()
+                    self._needs_build = True
 
                 # there is no org selection to go back to if
                 # the user is in only one org
-                if self.cache["orgs"] and len(self.cache["orgs"]) == 1:
+                if self.recordpool.orgs and len(self.recordpool.orgs) == 1:
                     back = None
                 else:
                     back = back_handler
+
+                def set_source(row):
+                    if row is None:
+                        return
+                    self.state.source_uid = row[5]
+                    self._needs_build = True
 
                 self.build_question(
                     "Please select a machine or cluster",
@@ -444,7 +451,7 @@ Once you have a source configured, you can continue.\
                                     "%Y-%m-%dT%H:%M:%SZ",
                                 )
                                 .replace(tzinfo=timezone.utc)
-                                .astimezone(tz=get_timezone(self.model))
+                                .astimezone(tz=get_timezone(self.config.settings))
                             )
                             if "last_data" in cluster
                             else "",
@@ -454,37 +461,39 @@ Once you have a source configured, you can continue.\
                                     "%Y-%m-%dT%H:%M:%SZ",
                                 )
                                 .replace(tzinfo=timezone.utc)
-                                .astimezone(tz=get_timezone(self.model))
+                                .astimezone(tz=get_timezone(self.config.settings))
                             ),
                             cluster.get("uid", ""),
                         ]
                         for cluster in sorted(
-                            self.cache["clusters"],
+                            clusters,
                             key=lambda c: c.get("last_data", 0),
                             reverse=True,
                         )
                     ]
                     + [self.format_source(source) for source in sources],
-                    lambda row: self.set_source(row[5]) if row is not None else None,
-                    index,
-                    self.cache["source_glob"],
+                    set_source,
+                    0,
+                    self.cache.source_glob,
                     back,
                     refresh_handler,
                 )
                 return
 
         # if there is no start time, ask the user to select one
-        if not self.config.start_time:
+        if not self.state.time:
             # if we were looking for sources, we don't need to ask the user to select a start time
             # just use the currently available time
-            if self.cache["looking_for_sources"]:
+            if self.cache.looking_for_sources and self.state.org_uid:
+                assert self.recordpool is not None
+                sources = self.recordpool.sources.get(self.state.org_uid, [])
                 try:
-                    self.config.start_time = datetime.strptime(
-                        self.cache["sources"][0]["last_stored_chunk_end_time"],
+                    self.state.time = datetime.strptime(
+                        sources[0]["last_stored_chunk_end_time"],
                         "%Y-%m-%dT%H:%M:%SZ",
                     ).replace(tzinfo=timezone.utc)
                 except ValueError:
-                    self.config.start_time = datetime.now() - timedelta(0, 30)
+                    self.state.time = datetime.now() - timedelta(0, 30)
                 self._needs_build = True
                 self._screen.force_update()
                 return
@@ -493,7 +502,7 @@ Once you have a source configured, you can continue.\
             return
 
         log.err("Reached the end of the config wizard without being complete")
-        log.debug(self.config)
+        log.debug(self.cache)
         self.build_error("An unexpected error occurred")
 
     def build_question(  # pylint: disable=too-many-arguments,too-many-locals
@@ -519,17 +528,20 @@ Once you have a source configured, you can continue.\
         # make the last column take up the rest of the space
         columns[-1].max_width = 0
 
-        list_box = Table(self.model, None, "selection")
+        list_box = Table(self.state, self.config.settings, None, "selection")
         list_box.header_enabled = False
         list_box.value = index
-        list_box.columns = columns
-        list_box.set_rows(answers, answers)
+        list_box.columns = [Column("ID", 0, int, enabled=False)] + columns
+        list_box.set_rows(
+            [[str(i)] + row for i, row in enumerate(answers)],
+            [[i] + row for i, row in enumerate(answers)],
+        )
         text_input = None
 
         def on_search():
             if text_input is None:
                 return
-            self.model.config["filter"] = text_input.value
+            self.state.filter = text_input.value
             list_box.do_filter()
 
         text_input = Text(on_change=on_search, name="search")
@@ -538,12 +550,12 @@ Once you have a source configured, you can continue.\
 
         def on_submit():
             if list_box.value is not None:
-                self.model.config["filter"] = None
+                self.state.filter = ""
                 row = list_box.get_selected()
-                callback([str(v) for v in row[1]] if row is not None else None)
+                callback([str(v) for v in row[1][1:]] if row is not None else None)
             else:
-                self.set_cache(notification="No option was selected, please select one")
-                self.trigger_build()
+                self.cache.notification = "No option was selected, please select one"
+                self._needs_build = True
 
         self._on_submit = on_submit
 
@@ -572,7 +584,10 @@ Once you have a source configured, you can continue.\
         self.layout.add_widget(FuncLabel(lambda: instructions), 1)
         self.layout.add_widget(Padding(), 1)
         self.footer.add_widget(
-            Button("Continue", lambda: (callback(), self.trigger_build())), 1
+            Button(
+                "Continue", lambda: (callback(), setattr(self, "_needs_build", True))
+            ),
+            1,
         )
         self.footer.add_widget(Button("Quit", self.quit), 2)
 
@@ -597,14 +612,24 @@ clicking on 'Create API Key'.\
             return re.match(r"^(?:[\w-]*\.){2}[\w-]*$", text.strip()) is not None
 
         text = Text(label="API Key:", validator=jwt_validator, name="api_key")
+        api_url_input = Text(label="API URL:", name="api_url")
+        api_url_input.value = DEFAULT_API_URL
 
-        def set_api_key():
-            self.config.api_key = text.value.strip()
-            self.trigger_build()
-
-        self._on_submit = set_api_key
+        self._on_submit = lambda: self.set_api_key(
+            text.value.strip(), api_url_input.value.strip()
+        )
         self.layout.add_widget(text, 1)
-        self.footer.add_widget(Button("Continue", set_api_key), 1)
+        self.layout.add_widget(api_url_input, 1)
+
+        self.footer.add_widget(
+            Button(
+                "Continue",
+                lambda: self.set_api_key(
+                    text.value.strip(), api_url_input.value.strip()
+                ),
+            ),
+            1,
+        )
         self.footer.add_widget(Button("Quit", self.quit), 2)
 
     def build_loading(self, message: str) -> None:
@@ -633,7 +658,7 @@ see the help page for more information.\
         time_label = Label("Start Time: 15 minutes ago")
         self.layout.add_widget(time_label, 1)
 
-        time_zone = get_timezone(self.model)
+        time_zone = get_timezone(self.config.settings)
 
         def on_change():
             selected_time = datetime.combine(date.value, time_widget.value).replace(
@@ -660,7 +685,13 @@ see the help page for more information.\
         # quick time selector
 
         # get source create time
-        source_time = self.cache.get("source", {}).get("valid_from", None)
+        sources = (
+            self.recordpool.sources.get(self.state.org_uid, [])
+            if self.recordpool and self.state.org_uid
+            else []
+        )
+        source = next((s for s in sources if s["uid"] == self.state.source_uid), {})
+        source_time = source.get("valid_from", None)
         if source_time is not None:
             source_time = datetime.strptime(source_time, "%Y-%m-%dT%H:%M:%SZ")
             source_time = source_time.replace(tzinfo=timezone.utc)
@@ -686,9 +717,7 @@ see the help page for more information.\
             self.layout.add_widget(create_time_button, 1)
             self.layout.add_widget(warning_label, 1)
 
-        last_seen_time = self.cache.get("source", {}).get(
-            "last_stored_chunk_end_time", None
-        )
+        last_seen_time = source.get("last_stored_chunk_end_time", None)
         if last_seen_time is not None:
             last_seen_time = datetime.strptime(last_seen_time, "%Y-%m-%dT%H:%M:%SZ")
 
@@ -740,121 +769,78 @@ see the help page for more information.\
         duration = Text(
             label="Duration:", validator=num_validator, on_change=on_change2
         )
-        duration.value = str(float(self.config.start_duration.total_seconds() // 60))
+        duration.value = str(self.cache.duration.total_seconds() / 60)
 
         selected_duration = timedelta(minutes=float(duration.value))
 
         self.layout.add_widget(duration, 1)
 
+        def set_start_time():
+            self.state.time = datetime.combine(date.value, time_widget.value).replace(
+                tzinfo=time_zone
+            )
+            self.cache.duration = selected_duration
+            self._needs_build = True
+
         self.footer.add_widget(
             Button(
                 "Continue",
-                lambda: self.set_start_time(
-                    date.value, time_widget.value, selected_duration, time_zone  # type: ignore
-                ),
+                set_start_time,
             ),
             1,
         )
 
         def back():
-            self.config.source_confirmed = False
-            self.trigger_build()
+            self.state.source_uid = None
+            self._needs_build = True
 
         self.footer.add_widget(Button("Back", back), 2)
 
-    def build_config_save(self) -> None:
-        """Construct a layout that asks the user which details to save in their
-        configuration to be used again"""
-        self.layout.add_widget(
-            FuncLabel(
-                lambda: """\
-Please select which items to save in your configuration. These will be used \
-again the next time you start Spydertop, and will skip this configuration menu.
+    def load_data(self, load_type: str) -> None:
+        """Loads a type of data from the API"""
 
-These are default values, and can be overridden by passing them as command line \
-arguments (except for the API Key).\
-""",
-            ),
-            1,
-        )
-        # these values are the opposite of the default values
-        # because the CheckBox widget calls the callback when
-        # we set its value initially, toggling the value
-        to_save = {
-            "API_Key": False,
-            "Machine": True,
-            "Org": False,
-        }
+        def thread_target():
+            assert self.recordpool is not None
 
-        def set_to_save(k):
-            to_save[k] = not to_save[k]
+            try:
+                if load_type == "orgs":
+                    self.recordpool.load_orgs(force_reload=self.cache.force_reload)
+                    if len(self.recordpool.orgs) == 0:
+                        self.cache.failure_reason = (
+                            "No organizations found! This is unexpected; try"
+                            "logging into your account on the website."
+                        )
+                if load_type == "sources":
+                    assert self.state.org_uid is not None
+                    self.recordpool.load_sources(
+                        self.state.org_uid, force_reload=self.cache.force_reload
+                    )
+                    self.recordpool.load_clusters(
+                        self.state.org_uid, force_reload=self.cache.force_reload
+                    )
+                    self.cache.force_reload = False
+                    if (
+                        self.state.org_uid not in self.recordpool.sources
+                        and self.state.org_uid not in self.recordpool.clusters
+                    ):
+                        self.cache.failure_reason = (
+                            "Failed to load any machines or clusters"
+                        )
+            except APIError as exc:
+                self.cache.failure_reason = str(exc)
 
-        for key, val in to_save.items():
-            value = getattr(self.config, key.lower())
-            if key == "API_Key":
-                # Show only the first and last few characters of the API key
-                value = value[:5] + "..." + value[-5:]
+            self._needs_build = True
+            self._screen.force_update()
+            self.cache.force_reload = False
 
-            checkbox = CheckBox(
-                value,
-                label=key,
-                on_change=lambda k=key: set_to_save(k),
-            )
-            checkbox.value = not val
-            self.layout.add_widget(checkbox, 1)
-
-        self.footer.add_widget(
-            Button(
-                "Continue",
-                lambda: self.save_config([key for key, val in to_save.items() if val]),
-            ),
-            1,
-        )
-        self.footer.add_widget(Button("Quit", self.quit), 2)
+        self.thread = Thread(target=thread_target)
+        self.thread.start()
 
     def build_confirm(self, question: str, callback: Callable[[bool], None]) -> None:
         """Create a simple layout to ask a yes/no question"""
         self.layout.add_widget(Label(question, align="^"), 1)
         self.footer.add_widget(Button("Yes", lambda: callback(True)), 1)
         self.footer.add_widget(Button("No", lambda: callback(False)), 2)
-
-    def save_config(self, attributes: List[str]) -> None:
-        """Save the configuration to the config file"""
-        if len(attributes) == 0:
-            self.trigger_build()
-            return
-        try:
-            # make sure the containing folder exists
-            path = os.path.join(os.environ["HOME"], ".spyderbat-api")
-            if not os.path.exists(path):
-                os.mkdir(path)
-
-            # read the config if it exists, and update it with the new values
-            config_path = os.path.join(path, "config.yaml")
-            if os.path.exists(config_path):
-                with open(config_path, "r", encoding="utf-8") as conf_file:
-                    config = yaml.safe_load(conf_file)
-                    if config is None:
-                        config = {}
-                if "default" not in config:
-                    config["default"] = {}
-            else:
-                config = {"default": {}}
-            for attribute in attributes:
-                config["default"][attribute.lower()] = getattr(
-                    self.config, attribute.lower()
-                )
-
-            # write the config back to disk
-            with open(
-                os.path.join(path, "config.yaml"), "w", encoding="utf-8"
-            ) as conf_file:
-                yaml.dump(config, conf_file)
-        except FileNotFoundError as exc:
-            self.model.fail(f"Error saving config: {exc}")
-
-        self.set_cache(needs_saving=False)
-        self.trigger_build()
 
     def format_source(self, source) -> List[str]:
         """Format a source for display"""
@@ -865,7 +851,7 @@ arguments (except for the API Key).\
                     "%Y-%m-%dT%H:%M:%SZ",
                 )
                 .replace(tzinfo=timezone.utc)
-                .astimezone(tz=get_timezone(self.model))
+                .astimezone(tz=get_timezone(self.config.settings))
             )
         except OverflowError:
             last_stored_time = datetime.fromtimestamp(0).replace(tzinfo=timezone.utc)
@@ -880,47 +866,15 @@ arguments (except for the API Key).\
             source.get("uid", ""),
         ]
 
-    def set_state(self, key: str, value: Any) -> None:
-        """Set a state variable"""
-        self.set_cache(**{key: value})
-        self.trigger_build()
-
-    def set_org(self, org_uid: str) -> None:
+    def set_api_key(self, key: str, api_url: str = DEFAULT_API_URL) -> None:
         """Set the organization"""
-        if org_uid != self.config.org:
-            self.set_cache(sources=None)
-            self.config.org = org_uid
-        self.config.org_confirmed = True
-        self.trigger_build()
 
-    def set_source(self, source_uid: str) -> None:
-        """Set the source"""
-        self.config.machine = source_uid
-        sources: list = self.cache["sources"]
-        source = next((s for s in sources if s["uid"] == source_uid), None)
-        if source is not None:
-            self.set_cache(source=source)
-        self.config.source_confirmed = True
-        self.trigger_build()
+        self.cache.api_key = key
+        self.recordpool = RecordPool(Secret(key, api_url), self.args.output)
 
-    def set_start_time(
-        self,
-        date: datetime,
-        time_portion: time,
-        duration: timedelta,
-        time_zone: Union[timezone, tzinfo, None],
-    ) -> None:
-        """Set the start time"""
-        self.config.start_time = datetime.combine(date, time_portion).replace(
-            tzinfo=time_zone
-        )
-        self.config.start_duration = duration
-        self.trigger_build()
-
-    def trigger_build(self) -> None:
-        """Trigger a rebuild of the layout"""
         self._needs_build = True
 
     def quit(self) -> None:
         """Quit the application"""
+        self.state.exit_reason = ExitReason.QUIT
         raise StopApplication("User quit")

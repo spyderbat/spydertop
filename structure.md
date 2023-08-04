@@ -4,7 +4,7 @@ This document is designed to describe the structure of the Spydertop code base a
 
 ## Execution
 
-Spydertop uses the [Click][click_docs] python CLI library to handle command-line arguments and initialization. When the program is run from the terminal, the first function to be called is `cli` in [`cli.py`](spydertop/cli.py). It creates a `Config` object, which processes the command-line arguments, and calls the `start_screen` function.
+Spydertop uses the [Click][click_docs] Python CLI library to handle command-line arguments and initialization. When the program is run from the terminal, the first function to be called is `cli` in [`cli.py`](spydertop/cli.py). It creates a `Config` object, which processes the command-line arguments, and calls the `start_screen` function.
 
 `start_screen` creates the TUI with [Asciimatics][asciimatics_docs]. It initializes the `AppModel` object, which contains the central data store for the UI, as well as several `Frames` and a `Screen`. The `Screen.play` function is then called, which starts the main event and render loops. When the screen is resized, a `ResizeScreenError` is raised by Asciimatics, and the screen is restarted using the last scene that was showing before the resize.
 
@@ -61,45 +61,55 @@ While the 16-color palette is more widely supported, these colors are often cust
 - 7: white
 - 8-15: modified (darker/lighter) versions of the first 8, sometimes identical to the first 8
 
-Colors and styles are defined centrally in the theme palette, which is defined in [`palettes.py`](spydertop/constants/palettes.py). This palette is only directly available to widgets, so most styling functions will use the coloring format directly (i.e. `"${2,1,7}Green bold text with a white background"`).
+Colors and styles are defined centrally in the theme palette, which is defined in [`palettes.py`](spydertop/constants/palettes.py). This palette is only directly available to widgets, so most styling functions will use the coloring format directly (i.e., `"${2,1,7}Green bold text with a white background"`).
 
 ## Spydertop's Objects
 
-### [Config](spydertop/config.py)
+### [Config](spydertop/config/config.py)
 
-The config object is responsible for the command-line arguments and settings, as well as reading and writing those values to disk. It is initialized with the CLI args, and reads the rest of the required values from disk. The application will go through configuration, and if necessary, trigger the config to write these values (the command-line arguments, usually specific to API calls) to disk in `~/.spyderbat-api/config.yaml`. During the application's main loop, the UI can read and write these configuration values from the `AppModel`, usually as `model.config`. When the application finishes, the `Config` object writes the changed settings values to disk in `~/.spyderbat-api/.spydertop-settings.yaml`.
+The `Config` object is a representation of the config file on disk. It contains both `Context`s and `Settings`. Contexts are a way for the user to specify default values for loading information, such as organization or source IDs. The `Settings` class contains all the configuration values that should persist across sessions. The config is stored in the user's canonical configuration directory, in `config.yaml`, or in the directory specified with command-line arguments. The config is loaded at the beginning of the program.
 
-Note: the goal with these file names is to allow for more that one application to use the configuration in `~/.spyderbat-api/config.yaml` for the Spyderbat API. Spydertop-specific values are stored in the hidden `.spydertop-settings.yaml` more as a cache than as a configurable settings file.
+Contexts will also reference `Secret`s, which remember API information (keys and URLs). The secrets are stored in the same directory as the configuration inside a `.secrets` file.
 
 ### [AppModel](spydertop/model.py)
 
 The `AppModel` object is the central data store for the program as well as an interface with the Spyderbat API. Because of this, it is somewhat monolithic, and is a good candidate for splitting up into more self-contained chunks.
 
+#### Preparation
+
+Before any information can be loaded, the `ConfigFrame` makes sure that enough information is available to load records, either from the API or from a file. Once it is finished, the model is created with the determined info.
+
 #### Loading
 
-After the `Config` object is complete, the `AppModel.init` function is called, which calls `AppModel.load_data` in a separate thread. `load_data` reads data in from an input, which is either the Spyderbat API or a file. In either case, a list of JSON-encoded records is received and sent to `AppModel._process_records`. This function parses the JSON objects and sorts them by schema. Most records are stored in a dictionary by their ID in the `_records` attribute, but `event_top` records are stored in the custom `CursorList` data structure. This class sorts the records by time and keeps a pointer to the record closes to the 'cursor' to make it possible to index the records by time instead of ID. The model also builds a tree representation of the processes received, based on the parent ID field.
+When the `ConfigFrame` is finished, the `AppModel.init` function is called, which calls `AppModel.load_data` in a separate thread. `load_data` delegates to the `RecordPool` (see below). After loading records, `event_top` records are stored in the custom `CursorList` data structure. This class sorts the records by time and keeps a pointer to the record closes to the 'cursor' to make it possible to index the records by time instead of ID. The model also builds a tree representation of the processes received, based on the parent ID field.
 
 #### Updating Time
 
 Each time the user moves to a new time, the model calls `_fix_state` to handle any necessary changes. This will update the `CursorList` cursor to the new time, check to see if more records need to be loaded, and update cached values such as the `_meminfo` object and `_time_elapsed`.
 
-To determine if new records need to be fetched, `_fix_state` checks a list of loaded time spans which is updated each time records are loaded. It is possible that a loaded time will have missing data, in which case no new data is loaded but the UI will show "No Data" in fields where the necessary information is missing.
+To determine if new records need to be fetched, `_fix_state` checks a list of loaded time spans which is updated each time records are loaded. It is possible that a loaded time will have missing data, in which case no new data is loaded, but the UI will show "No Data" in fields where the necessary information is missing.
 
 #### Failures
 
-In the case that an unexpected exception occurs or the model is put in a state where it cannot automatically recover, the `fail` function is called with a message for the user. This message is presented to the user in the `FailureFrame`, and they are given a few recovery options. These will call the `AppModel.recover` function, which will attempt to put the model back in a valid state.
+In the case that an unexpected exception occurs, or the model is put in a state where it cannot automatically recover, the `fail` function is called with a message for the user. This message is presented to the user in the `FailureFrame`, and they are given a few recovery options. These will call the `AppModel.recover` function, which will attempt to put the model back in a valid state.
 
 In addition to these functions, the model also provides ways to access the loaded data, to cache some data specific to certain frames or widgets, and access to the `Config` object through the `AppModel.config` attribute.
 
+### [RecordPool](spydertop/recordpool.py)
+
+The `RecordPool` is responsible for fetching and storing data from input, which is either the Spyderbat API or a file. In either case, a list of JSON-encoded records is received and sent to `RecordPool._process_records`. This function parses the JSON objects and sorts them by schema. Records are stored in a dictionary by their ID in the `records` attribute.
+
+The `RecordPool` also provides functions to fetch organizations, sources, and clusters.
+
 ### [MainFrame](spydertop/screens/main.py)
 
-The `MainFrame`, being the most used screen in the application, is also somewhat monolithic. The `Table` widget helps abstract away some of the complexity involved with displaying records, but more can still be done.
+The `MainFrame`, being the most used screen in the application, is also somewhat monolithic. The `Table` widget helps abstract away some complexity involved with displaying records, but more can still be done.
 
 The `MainFrame` is responsible for handling user input and deciding how much of the state to update. Because the process list can take a significant amount of time to update, there are various levels of caching and cache updating:
 
 - `needs_screen_refresh`: The child widgets need to redraw.
-- `needs_update`: The cached list of displayable data needs to be sent to the `Table` object. Also triggers a screen refresh
-- `needs_recalculate`: Data needs to be fetched from the model and columns need to be recalculated for those records. Also triggers an update
+- `needs_update`: The cached list of displayable data needs to be sent to the `Table` object. Also triggers a screen refresh.
+- `needs_recalculate`: Data needs to be fetched from the model and columns need to be recalculated for those records. Also triggers an update.
 
 #### Updating Columns
 
@@ -111,7 +121,7 @@ The `Table` object is responsible for displaying the records for the current tab
 
 ## Release
 
-Releases are triggered on the creation of a [SemVer][semver] named tag, such as `v1.3.9`. To create a release, create a tag with the version of that release, and monitor the GitHub action to ensure it runs properly.
+The release action is automatically triggered on the creation of a [SemVer][semver] named tag, such as `v1.3.9`. To publish a release, create a new release in the GitHub UI with a SemVer tag and monitor the GitHub action to ensure it runs properly.
 
 
 [click_docs]: https://click.palletsprojects.com/en/8.1.x/

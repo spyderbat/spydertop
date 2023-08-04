@@ -28,7 +28,7 @@ RUN pip --no-cache-dir install spydertop-*.whl
 
 COPY ./examples /spydertop/examples
 
-VOLUME /root/.spyderbat-api
+VOLUME /root/.config/spydertop
 
 # run the app
 ENTRYPOINT ["spydertop"]

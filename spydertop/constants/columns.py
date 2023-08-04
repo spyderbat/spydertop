@@ -74,7 +74,7 @@ class Column:
             self.value_getter = value_getter or (
                 lambda m, r: datetime.fromtimestamp(
                     float(r[str_field]), timezone.utc
-                ).astimezone(get_timezone(m))
+                ).astimezone(get_timezone(m.settings))
                 if str_field in r
                 else None
             )
@@ -205,6 +205,13 @@ PROCESS_COLUMNS = [
     Column("PPID", 7, int, enabled=False),
     Column("PID", 7, int),
     Column("MUID", 16, str, enabled=False),
+    Column(
+        "Machine",
+        16,
+        str,
+        enabled=False,
+        value_getter=lambda m, x: m.get_machine_short_name(x["muid"]),
+    ),
     Column(
         "USER",
         9,
@@ -625,7 +632,7 @@ CONTAINER_COLUMNS = [
         "CREATED",
         15,
         datetime,
-        value_formatter=lambda m, c, x: pretty_time((m.time - x).total_seconds())
+        value_formatter=lambda m, c, x: pretty_time((m.state.time - x).total_seconds())
         + " ago",
     ),
     Column("START_TIME", 27, datetime, field="valid_from", enabled=False),
@@ -635,11 +642,11 @@ CONTAINER_COLUMNS = [
         datetime,
         value_getter=lambda m, c: map_optional(
             lambda x: datetime.fromtimestamp(x, timezone.utc).astimezone(
-                get_timezone(m)
+                get_timezone(m.settings)
             ),
             c.get("container_detail_state", {}).get("StartedAt"),
         ),
-        value_formatter=lambda m, c, x: f"Up {pretty_time((m.time - x).total_seconds())}",
+        value_formatter=lambda m, c, x: f"Up {pretty_time((m.state.time - x).total_seconds())}",
     ),
     Column(
         "PORTS",
