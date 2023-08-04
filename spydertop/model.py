@@ -96,7 +96,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
 
         def guard():
             try:
-                self.load_data(self.timestamp, start_duration)
+                self.load_data(self.timestamp, start_duration, before=start_duration)
             except Exception as exc:  # pylint: disable=broad-except
                 self.fail("An exception occurred while loading data")
                 log.traceback(exc)
@@ -109,9 +109,11 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
         self,
         timestamp: Optional[float],
         duration: Optional[timedelta],
-        before=timedelta(seconds=120),
+        before: Optional[timedelta] = None,
     ) -> None:
         """Load data from the source, either the API or a file, then process it"""
+        if before is None:
+            before = timedelta(minutes=5)
         try:
             if isinstance(self._record_pool.input_, Secret):
                 if timestamp is None or self.state.source_uid is None:
@@ -184,9 +186,32 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
                 return
 
             if not self._record_pool.is_loaded(self.timestamp) and isinstance(
-                self._record_pool.input_, str
+                self._record_pool.input_, Secret
             ):
                 time_to_load = self.timestamp
+
+                if self.thread:
+                    self.thread.join()
+
+                thread = threading.Thread(
+                    target=lambda: self.load_data(
+                        time_to_load, timedelta(seconds=300), timedelta(seconds=300)
+                    )
+                )
+                thread.start()
+                self.thread = thread
+                return
+
+            # pre-emptively load more records if we're close to the end
+            if (
+                not self._record_pool.is_loaded(self.timestamp + 120)
+                or not self._record_pool.is_loaded(self.timestamp - 120)
+                and isinstance(self._record_pool.input_, Secret)
+            ):
+                time_to_load = self.timestamp
+
+                if self.thread:
+                    self.thread.join()
 
                 thread = threading.Thread(
                     target=lambda: self.load_data(
@@ -547,7 +572,7 @@ not enough information could be loaded.\
             and self.timestamp is not None
             and (
                 self._record_pool.is_loaded(self.timestamp)
-                or not isinstance(self._record_pool.input_, str)
+                or not isinstance(self._record_pool.input_, Secret)
             )
         )
 

@@ -106,7 +106,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     follow_record: bool = False
     utc_time: bool = False
     tab: str = "processes"
-    default_duration_minutes: int = 15
+    default_duration_minutes: int = 5
 
 
 class ConfigError(Exception):
