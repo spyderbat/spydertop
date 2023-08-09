@@ -82,13 +82,13 @@ spydertop config get
 Spydertop uses the Spyderbat APIs, so it must have access to a valid API key. API keys can be obtained from the API keys page under your Spyderbat account, and configured in spydertop using the `spydertop config set-secret` command:
 
 ```bash
-spydertop config set-secret --name mysecret --api-key $(cat ./apikey.txt)
+spydertop config set-secret mysecret --api-key $(cat ./apikey.txt)
 ```
 
-When using the `load` command, spydertop uses a *context* to determine how to load data. By default, you will ahve to specify the organization and source every time you start spydertop. However, you can update or create a new context to configure default values:
+When using the `load` command, spydertop uses a *context* to determine how to load data. By default, you will have to specify the organization and source every time you start spydertop. However, you can update or create a new context to configure default values:
 
 ```bash
-spydertop config set-context --name mycontext --secret mysecret --organization ORG_ID --source SOURCE_ID
+spydertop config set-context mycontext --secret mysecret --organization ORG_ID --source SOURCE_ID
 ```
 
 Your organization id can be found in the url for the dashboard, and many other pages. Similarly, the machine id can be located in the url of an investigation, or by enabling the id column in the sources list.
