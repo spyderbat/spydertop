@@ -314,8 +314,8 @@ $ spydertop -i examples/minikube-sock-shop.json.gz
             if len(self.recordpool.orgs) > 1:
                 orgs = sorted(
                     self.recordpool.orgs,
-                    key=lambda o: o.get("total_sources", 0),
-                    reverse=True,
+                    key=lambda o: o.get("name", "").lower(),
+                    reverse=False,
                 )
 
                 def reload_orgs():
@@ -326,20 +326,17 @@ $ spydertop -i examples/minikube-sock-shop.json.gz
                 def org_callback(row):
                     if row is None:
                         return
-                    self.state.org_uid = row[4]
+                    self.state.org_uid = row[3]
                     self._needs_build = True
 
                 self.build_question(
                     "Please select an organization",
                     [
                         [
-                            org["name"],
-                            f"Sources: {org['total_sources']}"
-                            if "total_sources" in org
-                            else "",
+                            org.get("name", ""),
                             str(org.get("owner_email", "")),
-                            ", ".join(org["tags"]) if "tags" in org else "",
-                            org["uid"],
+                            ", ".join(org.get("tags", [])),
+                            org.get("uid", ""),
                         ]
                         for org in orgs
                     ],
@@ -762,7 +759,7 @@ see the help page for more information.\
             if num_validator(duration.value):
                 selected_duration = timedelta(minutes=float(duration.value))
                 duration_label.text = (
-                    f"Duration to pre-load: +{duration.value} minutes, -5 minutes"
+                    f"Duration to pre-load: +/-{duration.value} minutes"
                 )
 
         self.layout.add_widget(Padding(), 1)
