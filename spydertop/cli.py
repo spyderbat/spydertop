@@ -33,7 +33,7 @@ from spydertop.recordpool import RecordPool
 from spydertop.screens import start_screen
 
 from spydertop.utils import convert_to_seconds, get_source_name, log
-from spydertop.utils.types import LoadArgs
+from spydertop.utils.types import APIError, LoadArgs
 
 
 class Timestamp(click.ParamType):
@@ -156,10 +156,18 @@ Run 'spydertop COMMAND --help' for more information on a command.
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 
-def ensure_org_uid(recordpool: RecordPool, organization: str) -> Optional[str]:
+def ensure_org_uid(
+    recordpool: RecordPool, organization: str, secret_name: Optional[str]
+) -> Optional[str]:
     """Converts an organization's name or uid to a uid"""
     click.echo("Loading organizations...")
-    recordpool.load_orgs()
+    try:
+        recordpool.load_orgs()
+    except APIError as exc:
+        click.echo(f"Error loading organizations: {exc}")
+        if secret_name:
+            click.echo(f'Are you sure the secret "{secret_name}" is the right one?')
+        return None
     maybe_org = [
         o
         for o in recordpool.orgs
@@ -180,7 +188,10 @@ def ensure_org_uid(recordpool: RecordPool, organization: str) -> Optional[str]:
 
 
 def ensure_source_uid(
-    recordpool: RecordPool, organization: Optional[str], source: str
+    recordpool: RecordPool,
+    organization: Optional[str],
+    source: str,
+    secret_name: Optional[str],
 ) -> Optional[str]:
     """Converts a source's name or uid to a uid"""
     if source.startswith("mach:") or source.startswith("clus:"):
@@ -192,7 +203,13 @@ def ensure_source_uid(
             param=organization,
         )
     click.echo("Loading sources...")
-    recordpool.load_sources(organization)
+    try:
+        recordpool.load_sources(organization)
+    except APIError as exc:
+        click.echo(f"Error loading sources: {exc}")
+        if secret_name:
+            click.echo(f'Are you sure the secret "{secret_name}" is the right one?')
+        return None
     maybe_source = [
         s
         for s in recordpool.sources.get(organization, [])
@@ -354,15 +371,16 @@ def load(  # pylint: disable=too-many-arguments
     )
     secret = context.get_secret(inner_config.directory) if context else None
     recordpool = RecordPool(secret) if secret else None
+    secret_name = context.secret_name if context else None
 
     if organization is not None and recordpool is not None:
-        organization = ensure_org_uid(recordpool, organization)
+        organization = ensure_org_uid(recordpool, organization, secret_name)
         if organization is None:
-            return
+            raise click.ClickException("Organization not found")
     if machine is not None and organization is not None and recordpool is not None:
-        machine = ensure_source_uid(recordpool, organization, machine)
+        machine = ensure_source_uid(recordpool, organization, machine, secret_name)
         if machine is None:
-            return
+            raise click.ClickException("Machine or Source not found")
 
     args = LoadArgs(
         organization=organization,
@@ -394,8 +412,7 @@ def get_config_from_ctx(ctx: click.Context) -> Config:
     ctx.ensure_object(dict)
     inner_config: Config = ctx.obj.get("config", None)
     if inner_config is None:
-        click.echo("No config loaded")
-        ctx.exit(1)
+        raise click.ClickException("No config loaded")
     return inner_config
 
 
@@ -420,8 +437,7 @@ def get_context(ctx: click.Context, name: Optional[str] = None):
     """
     inner_config = get_config_from_ctx(ctx)
     if name is not None and name not in inner_config.contexts:
-        click.echo(f"Context {name} does not exist")
-        ctx.exit(1)
+        raise click.ClickException(f"Context {name} does not exist")
     if name is not None:
         contexts = {name: inner_config.contexts[name].as_dict()}
     else:
@@ -497,17 +513,16 @@ def set_context(  # pylint: disable=too-many-arguments
 
     actual_secret = inner_config.get_secret(secret)
     if actual_secret is None:
-        click.echo(f"Secret '{secret}' does not exist.")
-        return
+        raise click.ClickException(f"Secret '{secret}' does not exist, no changes made")
     recordpool = RecordPool(actual_secret)
     if organization is not None:
-        organization = ensure_org_uid(recordpool, organization)
+        organization = ensure_org_uid(recordpool, organization, secret)
         if organization is None:
-            return
+            raise click.ClickException("Organization not found, no changes made")
     if source is not None:
-        source = ensure_source_uid(recordpool, organization, source)
+        source = ensure_source_uid(recordpool, organization, source, secret)
         if source is None:
-            return
+            raise click.ClickException("Machine or Source not found, no changes made")
 
     inner_config.contexts[name] = Context(
         secret or "default", organization, source, time, focuses
@@ -525,8 +540,7 @@ def use_context(ctx: click.Context, name: str):
     """
     inner_config = get_config_from_ctx(ctx)
     if name not in inner_config.contexts:
-        click.echo(f"Context {name} does not exist.")
-        return
+        raise click.ClickException(f"Context {name} does not exist.")
     inner_config.active_context = name
     inner_config.save()
 
@@ -540,8 +554,7 @@ def delete_context(ctx: click.Context, name: str):
     """
     inner_config = get_config_from_ctx(ctx)
     if name not in inner_config.contexts:
-        click.echo(f"Context {name} does not exist.")
-        return
+        raise click.ClickException(f"Context {name} does not exist.")
     click.confirm(f"Are you sure you want to delete context {name}?", abort=True)
     del inner_config.contexts[name]
     inner_config.save()
@@ -601,8 +614,7 @@ def get_api_secret(ctx: click.Context, name=None):
     config_dir = get_config_from_ctx(ctx).directory
     secrets = Secret.get_secrets(config_dir)
     if name is not None and name not in secrets:
-        click.echo(f"Secret {name} does not exist")
-        return
+        raise click.ClickException(f"Secret {name} does not exist.")
     if name:
         secrets = {name: secrets[name].as_dict()}
     else:
@@ -620,8 +632,7 @@ def delete_api_secret(ctx: click.Context, name=None):
     config_dir = get_config_from_ctx(ctx).directory
     secrets = Secret.get_secrets(config_dir)
     if name not in secrets:
-        click.echo(f"Secret {name} does not exist.")
-        return
+        raise click.ClickException(f"Secret {name} does not exist.")
     click.confirm(f"Are you sure you want to delete secret {name}?", abort=True)
 
     del secrets[name]

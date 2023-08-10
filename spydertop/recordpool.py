@@ -239,6 +239,7 @@ No more records can be loaded."
             timeout=(timedelta(minutes=0) if force_reload else timedelta(hours=6)),
         )
         orgs = orjson.loads(orgs)
+        orgs = [org for org in orgs if org.get("uid") != "defend_the_flag"]
         self.orgs = orgs
 
     def load_sources(  # pylint: disable=too-many-arguments

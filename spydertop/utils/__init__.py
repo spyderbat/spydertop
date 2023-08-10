@@ -171,7 +171,9 @@ def sum_element_wise(
     group: Union[Iterable[Dict[Any, int]], Iterable[List[int]], Iterable[Tuple[int]]]
 ):
     """Sums the values of a group of dicts, lists, or tuples, providing an element-wise sum"""
-    first = next(iter(group))
+    # this type ignore is due to what seems to be an issue with pyright
+    # it should be removed if the issue is fixed
+    first = next(iter(group))  # type: ignore
     if isinstance(first, dict):
         totals = {}
         for values in group:

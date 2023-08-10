@@ -613,7 +613,7 @@ not enough information could be loaded.\
         source = [
             source
             for source in self._record_pool.sources.get(self.state.org_uid, [])
-            if source["id"] == machine_id
+            if source.get("uid") == machine_id
         ]
         alternative_name = (
             get_machine_short_name(self.machines[machine_id])
