@@ -72,7 +72,7 @@ class Column:
         str_field: str = field or name.lower()
         if value_type is datetime:
 
-            def default_date_getter(m: AppModel, r: Record | None):
+            def default_date_getter(m: AppModel, r: Union[Record, None]):
                 value = r.get(str_field) if r is not None else None
                 if not isinstance(value, SupportsFloat):
                     return None
@@ -83,7 +83,7 @@ class Column:
             self.value_getter = value_getter or default_date_getter
         else:
 
-            def default_getter(_, r: Record | None):
+            def default_getter(_, r: Union[Record, None]):
                 return r.get(str_field) if r is not None else None
 
             self.value_getter = value_getter or default_getter

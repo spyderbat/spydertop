@@ -75,7 +75,7 @@ class RecordPool:
 
     def _call_objects(
         self,
-        ids: list[str],
+        ids: List[str],
         org_uid: str,
         retry: bool = True,
     ) -> List[Record]:
@@ -131,8 +131,8 @@ class RecordPool:
         end_time: float,
         org_uid: str,
         query: str,
-        muid: str | None = None,
-        cluster_uid: str | None = None,
+        muid: Union[str, None] = None,
+        cluster_uid: Union[str, None] = None,
     ) -> List[Record]:
         """
         Calls the search API, then fetches the full records from objects,
@@ -335,7 +335,7 @@ No more records can be loaded."
         parallel=True,
     ) -> None:
         """Process the loaded records, parsing them and adding them to the model"""
-        records: List[Record] | None = None
+        records: Optional[List[Record]] = None
 
         # if lines is binary, convert to text
         if len(lines) > 0 and isinstance(lines[0], bytes):

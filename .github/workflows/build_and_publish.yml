@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.7", "3.11"]
+        python-version: ["3.8", "3.13"]
     steps:
       -
         name: Checkout
@@ -48,24 +48,24 @@ jobs:
       # these could be a separate job, but they require the version step
       - 
         name: Publish to PyPI
-        if: matrix.python-version == '3.11'
+        if: matrix.python-version == '3.13'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
       -
         name: Set up Docker Buildx
-        if: matrix.python-version == '3.11'
+        if: matrix.python-version == '3.13'
         uses: docker/setup-buildx-action@v2
       -
         name: Login to DockerHub
-        if: matrix.python-version == '3.11'
+        if: matrix.python-version == '3.13'
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       -
         name: Build and push
-        if: matrix.python-version == '3.11'
+        if: matrix.python-version == '3.13'
         uses: docker/build-push-action@v3
         with:
           context: .
@@ -91,7 +91,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: 3.11
+        python-version: 3.13
         cache: pip
         cache-dependency-path: |
           pyproject.toml
