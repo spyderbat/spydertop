@@ -63,7 +63,7 @@ class LoadingFrame(Frame):
     data and processing records."""
 
     _model: AppModel
-    _label: Label
+    _label: FuncLabel
 
     def __init__(self, screen: Screen, model: AppModel) -> None:
         # pylint: disable=duplicate-code

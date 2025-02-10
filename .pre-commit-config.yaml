@@ -1,14 +1,14 @@
 repos:
-  - repo: https://gitlab.com/vojko.pribudic.foss/pre-commit-update
+-   repo: https://gitlab.com/vojko.pribudic.foss/pre-commit-update
     rev: v0.6.1
     hooks:
-      - id: pre-commit-update
-  - repo: https://github.com/spyderbat/spyder-scan
+    -   id: pre-commit-update
+-   repo: https://github.com/spyderbat/spyder-scan
     rev: v1.1.1
     hooks:
-      - id: spyder-scan
-  - repo: https://github.com/trufflesecurity/trufflehog
-    rev: v3.88.5
+    -   id: spyder-scan
+-   repo: https://github.com/trufflesecurity/trufflehog
+    rev: v3.88.6
     hooks:
-      - id: trufflehog
+    -   id: trufflehog
         entry: trufflehog git file://. --since-commit HEAD --no-verification --fail

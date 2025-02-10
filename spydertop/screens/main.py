@@ -156,7 +156,7 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         for machine_id in machines_to_show:
             machine = self._model.machines.get(machine_id)
             if machine is not None:
-                cpu_count = machine["machine_cores"]
+                cpu_count = machine["machine_cores"] if "machine_cores" in machine and isinstance(machine["machine_cores"], int) else 0
             else:
                 times = self._model.get_value("cpu_time", machine_id)
                 if times is None:

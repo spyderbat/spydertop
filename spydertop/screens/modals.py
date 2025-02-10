@@ -10,7 +10,7 @@ A set of modal frames used for temporary input
 """
 
 import re
-from typing import Callable, Optional
+from typing import Callable, Optional, Type
 from asciimatics.widgets import Frame, Text, Layout, Widget
 from asciimatics.screen import Screen
 from asciimatics.event import KeyboardEvent, MouseEvent
@@ -38,7 +38,7 @@ class InputModal(Frame):
         on_change: Optional[Callable[[Optional[str]], None]] = None,
         on_submit: Optional[Callable[[str], None]] = None,
         on_death: Optional[Callable[[], None]] = None,
-        widget=Text,
+        widget:Type[Widget]=Text,
         **kwargs,
     ) -> None:
         """
@@ -56,7 +56,7 @@ class InputModal(Frame):
         # handle on_change to call with the value
         if on_change:
             self._text_input = widget(
-                on_change=(
+                on_change=( # pyright: ignore [reportCallIssue]
                     lambda: on_change(self._text_input.value)
                     if self._text_input.is_valid
                     else None
@@ -66,9 +66,10 @@ class InputModal(Frame):
         else:
             self._text_input = widget(**kwargs)
 
+        required_height = self._text_input.required_height(0, width)
         super().__init__(
             screen,
-            self._text_input.required_height(0, width) + 2,
+            required_height + 2 if required_height is not None else 2,
             width + 2,
             is_modal=True,
             reduce_cpu=True,
@@ -87,14 +88,14 @@ class InputModal(Frame):
 
         self.fix()
         if value:
-            self._text_input.value = value
+            self._text_input.value = value # pyright: ignore [reportAttributeAccessIssue]
 
     def process_event(self, event):
         assert self.scene is not None
         if isinstance(event, KeyboardEvent):
             if event.key_code == ord("\n") or event.key_code == Screen.KEY_F10:
                 if self._text_input.is_valid:
-                    self._on_submit(self._text_input.value)
+                    self._on_submit(self._text_input.value or "")
                 self.scene.remove_effect(self)
                 self._on_death()
                 return None

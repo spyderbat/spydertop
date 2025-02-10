@@ -167,7 +167,7 @@ def calculate_widths(screen_width, desired_columns: List[int]) -> List[int]:
 
 
 def sum_element_wise(
-    group: Union[Iterable[Dict[Any, int]], Iterable[List[int]], Iterable[Tuple[int]]]
+    group: Union[Iterable[Dict[Any, int]], Iterable[List[int]], Iterable[Tuple[int]]],
 ):
     """Sums the values of a group of dicts, lists, or tuples, providing an element-wise sum"""
     try:
@@ -230,9 +230,7 @@ def align_with_overflow(
     left_space = (
         0
         if align == Alignment.LEFT
-        else extra_space // 2
-        if align == Alignment.CENTER
-        else extra_space
+        else extra_space // 2 if align == Alignment.CENTER else extra_space
     )
     spaces = " " * left_space
     right_spaces = " " * (extra_space - left_space + 1) if include_padding else ""
@@ -254,11 +252,15 @@ def get_source_name(source: dict) -> str:
 
 def get_machine_short_name(machine: Record) -> str:
     """Get a short name for a machine"""
-    if "cloud_tags" in machine and "Name" in machine["cloud_tags"]:
+    if (
+        "cloud_tags" in machine
+        and isinstance(machine["cloud_tags"], dict)
+        and "Name" in machine["cloud_tags"]
+    ):
         if "k8s" in "".join(list(machine["cloud_tags"].keys())):
-            return "node:" + machine["hostname"]
+            return "node:" + str(machine["hostname"])
         return machine["cloud_tags"]["Name"]
-    return machine["hostname"]
+    return str(machine["hostname"])
 
 
 def obscure_key(key: str) -> str:

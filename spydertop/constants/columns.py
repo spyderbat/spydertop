@@ -12,8 +12,9 @@ the cells inside of the records table.
 The Column class is used to define the columns that are displayed in the table.
 """
 
+from _typeshed import ConvertibleToFloat
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Type, Callable, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Type, Callable, TYPE_CHECKING, Union
 
 import orjson
 
@@ -43,7 +44,7 @@ class Column:
 
     header_name: str
     max_width: int
-    value_type: Type = Any
+    value_type: Type[Any] = Type[Any]
     enabled: bool
     align: Alignment
     value_getter: Callable[[AppModel, Record], Any]
@@ -71,21 +72,18 @@ class Column:
         self.enabled = enabled
         str_field: str = field or name.lower()
         if value_type is datetime:
-            self.value_getter = value_getter or (
-                lambda m, r: datetime.fromtimestamp(
-                    float(r[str_field]), timezone.utc
+            def default_date_getter(m: AppModel, r: Record | None):
+                value = r.get(str_field) if r is not None else None
+                if not isinstance(value, ConvertibleToFloat):
+                    return None
+                return datetime.fromtimestamp(
+                    float(value), timezone.utc
                 ).astimezone(get_timezone(m.settings))
-                if str_field in r
-                else None
-            )
+            self.value_getter = value_getter or default_date_getter
         else:
-            self.value_getter = value_getter or (
-                lambda m, r: (
-                    value_type(r.get(str_field))
-                    if r is not None and str_field in r
-                    else None
-                )
-            )
+            def default_getter(_, r: Record | None):
+                return r.get(str_field) if r is not None else None
+            self.value_getter = value_getter or default_getter
         self.value_formatter = value_formatter or (lambda m, r, v: str(v))
 
     def get_value(self, model: AppModel, record: Record) -> Any:
@@ -120,8 +118,8 @@ def get_cpu_per(model: AppModel, process: Record):
     prev_record = get_resource_record(model, process, previous=True)
     if record is None or prev_record is None:
         return None
-    time_delta = model.get_time_elapsed(muid=process["muid"])
-    clk_tck = model.get_value("clk_tck", muid=process["muid"])
+    time_delta = model.get_time_elapsed(muid=str(process["muid"]))
+    clk_tck = model.get_value("clk_tck", muid=str(process["muid"]))
     cpu = (
         record["utime"] - prev_record["utime"] + record["stime"] - prev_record["stime"]
     )
@@ -151,7 +149,7 @@ def get_time_plus_value(model: AppModel, process: Record):
     record = get_resource_record(model, process)
     if record is None:
         return None
-    clk_tck = model.get_value("clk_tck", muid=process["muid"])
+    clk_tck = model.get_value("clk_tck", muid=str(process["muid"]))
     cpu = record["utime"] + record["stime"]
     time = cpu / clk_tck
     return timedelta(seconds=time)
@@ -192,9 +190,9 @@ def format_container(model: AppModel, _p, container: str):
 
 def get_resource_record(
     model: AppModel, process_record: Record, previous=False
-) -> Optional[Record]:
+) -> Optional[Dict[str, Union[int, float]]]:
     """Returns the resource record for the process"""
-    process_table = model.get_value("processes", process_record["muid"], previous)
+    process_table = model.get_value("processes", str(process_record["muid"]), previous)
     if process_table is None:
         return None
     default_values = process_table["default"]
@@ -216,7 +214,7 @@ PROCESS_COLUMNS = [
         16,
         str,
         enabled=False,
-        value_getter=lambda m, x: m.get_machine_short_name(x["muid"]),
+        value_getter=lambda m, x: m.get_machine_short_name(str(x["muid"])),
     ),
     Column(
         "USER",
@@ -341,7 +339,7 @@ PROCESS_COLUMNS = [
         9,
         timedelta,
         align=Alignment.RIGHT,
-        value_getter=lambda m, x: timedelta(seconds=m.timestamp - x["valid_from"]),
+        value_getter=lambda m, x: timedelta(seconds=m.timestamp - x["valid_from"]), # type: ignore
         value_formatter=lambda m, r, x: pretty_time(x.total_seconds()),
         enabled=False,
     ),
@@ -359,7 +357,7 @@ PROCESS_COLUMNS = [
         12,
         str,
         value_getter=lambda m, x: map_optional(
-            lambda x: m.containers.get(x, {}).get("container_short_id"),
+            lambda x: m.containers.get(x, {}).get("container_short_id"), # type: ignore
             x.get("container"),
         ),
         enabled=False,
@@ -369,7 +367,7 @@ PROCESS_COLUMNS = [
         15,
         str,
         value_getter=lambda m, x: map_optional(
-            lambda x: m.containers.get(x, {}).get("image"), x.get("container")
+            lambda x: m.containers.get(x, {}).get("image"), x.get("container") # type: ignore
         ),
         enabled=False,
     ),
@@ -408,7 +406,7 @@ SESSION_COLUMNS = [
         9,
         str,
         field="psuid",
-        value_formatter=lambda m, s, x: m.sessions[x]["euser"]
+        value_formatter=lambda m, s, x: str(m.sessions[x]["euser"])
         if x in m.sessions
         else "",
         enabled=False,
@@ -419,9 +417,9 @@ SESSION_COLUMNS = [
         10,
         timedelta,
         align=Alignment.RIGHT,
-        value_getter=lambda m, s: timedelta(seconds=m.timestamp - s["valid_from"])
-        if s["expire_at"] > m.timestamp
-        else timedelta(seconds=s["expire_at"] - s["valid_from"]),
+        value_getter=lambda m, s: timedelta(seconds=m.timestamp - s["valid_from"]) # type:ignore
+        if s["expire_at"] > m.timestamp # type:ignore
+        else timedelta(seconds=s["expire_at"] - s["valid_from"]), # type:ignore
         value_formatter=lambda m, s, x: pretty_time(x.total_seconds()),
     ),
     Column("LEADPID", 7, int, field="pid"),
@@ -449,9 +447,9 @@ CONNECTION_COLUMNS = [
         "DURATION",
         10,
         timedelta,
-        value_getter=lambda m, c: timedelta(seconds=m.timestamp - c["valid_from"])
-        if "duration" not in c or "valid_to" not in c or c["valid_to"] > m.timestamp
-        else timedelta(seconds=c["duration"]),
+        value_getter=lambda m, c: timedelta(seconds=m.timestamp - c["valid_from"]) # type:ignore
+        if "duration" not in c or "valid_to" not in c or c["valid_to"] > m.timestamp # type:ignore
+        else timedelta(seconds=c["duration"]), # type:ignore
         value_formatter=lambda m, c, x: pretty_time(x.total_seconds()),
     ),
     Column("TXPACK", 6, int, field="packets_tx", enabled=False),
@@ -475,7 +473,7 @@ CONNECTION_COLUMNS = [
         str,
         align=Alignment.RIGHT,
         value_getter=lambda m, c: f'{c["local_ip"]}:{c["local_port"]}',
-        value_formatter=lambda m, c, x: pretty_address(c["local_ip"], c["local_port"]),
+        value_formatter=lambda m, c, x: pretty_address(c["local_ip"], c["local_port"]), # type:ignore
     ),
     Column(
         "DIR",
@@ -495,7 +493,7 @@ CONNECTION_COLUMNS = [
         str,
         value_getter=lambda m, c: f'{c["remote_ip"]}:{c["remote_port"]}',
         value_formatter=lambda m, c, x: pretty_address(
-            c["remote_ip"], c["remote_port"]
+            c["remote_ip"], c["remote_port"] # type:ignore
         ),
     ),
 ]
@@ -528,7 +526,7 @@ FLAG_COLUMNS = [
         10,
         timedelta,
         align=Alignment.RIGHT,
-        value_getter=lambda m, f: timedelta(seconds=m.timestamp - f["time"]),
+        value_getter=lambda m, f: timedelta(seconds=m.timestamp - f["time"]), # type:ignore
         value_formatter=lambda m, f, x: pretty_time(x.total_seconds()),
     ),
     Column(
@@ -544,15 +542,15 @@ FLAG_COLUMNS = [
         3,
         Severity,
         align=Alignment.CENTER,
-        value_getter=lambda m, f: Severity(SEVERITIES[f["severity"]]),
+        value_getter=lambda m, f: Severity(SEVERITIES[f["severity"]]), # type:ignore
         value_formatter=color_severity,
     ),
     Column(
         "MITRE",
         30,
         str,
-        value_getter=lambda m, f: f["mitre_mapping"][0].get("technique_name", None)
-        if len(f["mitre_mapping"]) > 0
+        value_getter=lambda m, f: f["mitre_mapping"][0].get("technique_name", None) # type:ignore
+        if len(f["mitre_mapping"]) > 0 # type:ignore
         else None,
         enabled=False,
     ),
@@ -579,7 +577,7 @@ LISTENING_SOCKET_COLUMNS = [
         10,
         timedelta,
         value_getter=lambda m, l: timedelta(
-            seconds=l.get("duration", m.timestamp - l["valid_from"])
+            seconds=l.get("duration", m.timestamp - l["valid_from"]) # type:ignore
         ),
         value_formatter=lambda m, l, x: pretty_time(x.total_seconds()),
     ),
@@ -589,7 +587,7 @@ LISTENING_SOCKET_COLUMNS = [
         str,
         align=Alignment.RIGHT,
         value_getter=lambda m, l: f'{l["local_ip"]}:{l["local_port"]}',
-        value_formatter=lambda m, l, x: pretty_address(l["local_ip"], l["local_port"]),
+        value_formatter=lambda m, l, x: pretty_address(l["local_ip"], l["local_port"]), # type:ignore
     ),
     Column("PUID", 20, str, enabled=False),
     Column("PROCESS", 0, str, field="proc_name"),
@@ -600,10 +598,10 @@ LISTENING_SOCKET_COLUMNS = [
 
 def get_system(model: AppModel, cont: Record) -> Optional[str]:
     """Get the system name for a container."""
-    muid = cont["muid"]
+    muid = str(cont["muid"])
     machine_rec = model.machines[muid]
     if machine_rec is not None:
-        return machine_rec["hostname"]
+        return str(machine_rec["hostname"])
     return None
 
 
@@ -611,7 +609,7 @@ def format_mounts(_m: AppModel, _c: Record, mounts: List[Record]) -> str:
     """Format the mounts for a container."""
     return "\n".join(
         f"{m['source']}:{m['Destination']}"
-        for m in sorted(mounts, key=lambda m: m["Destination"])
+        for m in sorted(mounts, key=lambda m: m["Destination"]) # type:ignore
     )
 
 
@@ -650,7 +648,7 @@ CONTAINER_COLUMNS = [
             lambda x: datetime.fromtimestamp(x, timezone.utc).astimezone(
                 get_timezone(m.settings)
             ),
-            c.get("container_detail_state", {}).get("StartedAt"),
+            c.get("container_detail_state", {}).get("StartedAt"), # type:ignore
         ),
         value_formatter=lambda m, c, x: f"Up {pretty_time((m.state.time - x).total_seconds())}",
     ),
@@ -683,7 +681,7 @@ CONTAINER_COLUMNS = [
         "ENTRYPOINT",
         15,
         str,
-        value_getter=lambda m, c: " ".join(c.get("entrypoint") or []),
+        value_getter=lambda m, c: " ".join(c.get("entrypoint") or []), # type:ignore
         value_formatter=lambda m, c, x: x if x != "/pause" else "${8,1}/pause",
         enabled=False,
     ),

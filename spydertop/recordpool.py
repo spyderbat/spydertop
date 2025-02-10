@@ -369,13 +369,13 @@ No more records can be loaded."
         for record in records:
             self.progress += 1 / len(lines) * progress_increase * 0.5
 
-            short_schema = record["schema"].split(":")[0]
+            short_schema = str(record["schema"]).split(":")[0]
 
             group = self.records[short_schema]
-            rec_id = record["id"]
+            rec_id = str(record["id"])
             if rec_id in group:
                 curr_rec = group[rec_id]
-                if curr_rec["time"] > record["time"]:
+                if not isinstance(curr_rec["time"], float) or not isinstance(record["time"], float) or curr_rec["time"] > record["time"]:
                     # we already have a record with a newer timestamp
                     continue
             group[rec_id] = record

@@ -184,7 +184,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                     x_offset += width + 1
             y_offset += 1
 
-    def process_event(  # pylint: disable=too-many-return-statements,too-many-branches
+    def process_event(  # pylint: disable=too-many-return-statements,too-many-branches # pyright: ignore [reportIncompatibleMethodOverride]
         self, event
     ):
         if isinstance(event, KeyboardEvent):
@@ -262,7 +262,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                 return None
         return event
 
-    def required_height(self, offset, width):
+    def required_height(self, offset, width): # pyright: ignore [reportIncompatibleMethodOverride]
         return Widget.FILL_FRAME
 
     def reset(self):
@@ -516,7 +516,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         )
 
     @property
-    def value(self) -> int:
+    def value(self) -> int: # pyright: ignore [reportIncompatibleMethodOverride]
         """The selected row"""
         return self._state.selected_row
 

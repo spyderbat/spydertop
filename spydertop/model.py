@@ -146,7 +146,8 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
 
         event_top_data = self._record_pool.records["event_top_data"].values()
         event_top_data = groupby(event_top_data, lambda record: record["muid"])
-        self._tops = {
+        # no idea what is setting it off here
+        self._tops = {  # pyright: ignore [reportAttributeAccessIssue]
             muid: CursorList("time", list(records), self.timestamp)
             for muid, records in event_top_data
         }
@@ -353,9 +354,9 @@ not enough information could be loaded.\
                     "Content-Type": "application/json",
                 }
                 if isinstance(self._record_pool.input_, Secret):
-                    headers[
-                        "Authorization"
-                    ] = f"Bearer {self._record_pool.input_.api_key}"
+                    headers["Authorization"] = (
+                        f"Bearer {self._record_pool.input_.api_key}"
+                    )
                 # send the data to the API
                 response = self._http_client.request(
                     "POST",
@@ -399,10 +400,7 @@ not enough information could be loaded.\
             return self._tops[muid][index][key]
         if not self.tops_valid():
             return None
-        return sum_element_wise(
-            c_list[index][key]
-            for c_list in self._tops.values()
-        )
+        return sum_element_wise(c_list[index][key] for c_list in self._tops.values())
 
     def get_time_elapsed(self, muid: str) -> float:
         """Get the time elapsed since the last event_top_data record for
@@ -460,16 +458,18 @@ not enough information could be loaded.\
 
             # add the root processes to the tree
             if kthreadd:
-                self._tree[kthreadd] = AppModel._make_branch(
+                root = AppModel._make_branch(
                     kthreadd, processes_w_children, not self.settings.collapse_tree
                 )
+                assert root is not None
                 # root processes are always enabled
-                self._tree[kthreadd] = (True, self._tree[kthreadd][1])
+                self._tree[kthreadd] = (True, root[1])
             if init:
-                self._tree[init] = AppModel._make_branch(
+                root = AppModel._make_branch(
                     init, processes_w_children, not self.settings.collapse_tree
                 )
-                self._tree[init] = (True, self._tree[init][1])
+                assert root is not None
+                self._tree[init] = (True, root[1])
 
     def recover(self, method="revert") -> None:  # pylint: disable=too-many-branches
         """Recover the state of the model, using the given method.
@@ -511,7 +511,7 @@ not enough information could be loaded.\
                         )
                     )
                 )
-                if muid is not None:
+                if muid is not None and isinstance(muid, str):
                     c_list = self._tops.get(muid, CursorList("", [], 0))
                     while not new_meminfo and index < len(c_list.data):
                         new_meminfo = c_list.data[index]["memory"]

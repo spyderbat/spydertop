@@ -333,9 +333,12 @@ def update_swap(model: AppModel):
 
 def show_uptime(model: AppModel):
     """Generates the string for the uptime meter"""
+    if model.timestamp is None:
+        return ""
     uptime = ", ".join(
         str(timedelta(seconds=model.timestamp - mach["boot_time"]))
         for mach in model.machines.values()
+        if "boot_time" in mach and isinstance(mach["boot_time"], float)
     )
     if len(uptime) == 0:
         return add_palette("  ${{{meter_label}}}Uptime: ${{1,1}}No Data", model)

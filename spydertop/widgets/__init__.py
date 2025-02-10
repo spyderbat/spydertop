@@ -39,7 +39,7 @@ class Padding(Widget):
     def reset(self):
         pass
 
-    def required_height(self, offset, width):
+    def required_height(self, offset, width): # pyright: ignore [reportIncompatibleMethodOverride]
         return self._height
 
     def update(self, frame_no):
@@ -104,7 +104,7 @@ class FuncLabel(Widget):
     def reset(self):
         pass
 
-    def required_height(self, offset, width):
+    def required_height(self, offset, width): # pyright: ignore [reportIncompatibleMethodOverride]
         text = self.generator()
         height = 0
         wrapper = CustomTextWrapper(
@@ -163,6 +163,6 @@ class FuncLabel(Widget):
                 offset += 1
 
     @property
-    def value(self):
+    def value(self): # pyright: ignore [reportIncompatibleMethodOverride]
         """The text of the label."""
         return self.generator()

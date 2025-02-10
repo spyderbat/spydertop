@@ -16,7 +16,7 @@ from enum import Enum
 import re
 from textwrap import TextWrapper
 import traceback
-from typing import Dict, List, NewType, Optional, TextIO, Tuple, Union, Any
+from typing import Dict, List, Optional, TextIO, Tuple, Union, Any
 import logging
 
 import click
@@ -25,9 +25,9 @@ from asciimatics.parsers import Parser
 from spydertop.constants import COLOR_REGEX
 
 # custom types for data held in the model
-Tree = NewType("Tree", Dict[str, Optional[Tuple[bool, "Tree"]]])
-RecordInternal = NewType("RecordInternal", Any)
-Record = NewType("Record", Dict[str, RecordInternal])
+Tree = Dict[str, Optional[Tuple[bool, "Tree"]]]
+RecordInternal = Union[str, int, float, list, dict, None]
+Record = Dict[str, RecordInternal]
 
 
 @dataclass
@@ -54,7 +54,7 @@ class Bytes:
 
     value: int
 
-    def __init__(self, value: Union[int, str]):
+    def __init__(self, value: Union[int, float, str]):
         if isinstance(value, str):
             self.value = int(Bytes.parse_bytes(value))
         else:
@@ -507,7 +507,7 @@ class ExtendedParser(Parser):
 
     _color_regex = re.compile(COLOR_REGEX)
 
-    def parse(self):
+    def parse(self): # pyright: ignore [reportIncompatibleMethodOverride]
         if self._state is None or self._state.text is None:
             return
         if self._state.attributes:

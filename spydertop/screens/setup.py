@@ -318,7 +318,7 @@ class SetupFrame(Frame):
             if isinstance(widget, Text):
                 widget.value = str(default_getter(self._model))
             else:
-                widget.value = default_getter(self._model)
+                widget.value = default_getter(self._model) # type: ignore
 
         return widget
 
