@@ -507,7 +507,7 @@ class ExtendedParser(Parser):
 
     _color_regex = re.compile(COLOR_REGEX)
 
-    def parse(self): # pyright: ignore [reportIncompatibleMethodOverride]
+    def parse(self):  # pyright: ignore [reportIncompatibleMethodOverride]
         if self._state is None or self._state.text is None:
             return
         if self._state.attributes:

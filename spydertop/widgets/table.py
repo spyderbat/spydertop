@@ -177,9 +177,11 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                         color,
                         attr,
                         background,
-                        colour_map=line.colour_map  # type: ignore
-                        if hasattr(line, "colour_map") and has_color
-                        else None,
+                        colour_map=(
+                            line.colour_map  # type: ignore
+                            if hasattr(line, "colour_map") and has_color
+                            else None
+                        ),
                     )
                     x_offset += width + 1
             y_offset += 1
@@ -262,7 +264,9 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                 return None
         return event
 
-    def required_height(self, offset, width): # pyright: ignore [reportIncompatibleMethodOverride]
+    def required_height(
+        self, offset, width
+    ):  # pyright: ignore [reportIncompatibleMethodOverride]
         return Widget.FILL_FRAME
 
     def reset(self):
@@ -516,7 +520,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
         )
 
     @property
-    def value(self) -> int: # pyright: ignore [reportIncompatibleMethodOverride]
+    def value(self) -> int:  # pyright: ignore [reportIncompatibleMethodOverride]
         """The selected row"""
         return self._state.selected_row
 

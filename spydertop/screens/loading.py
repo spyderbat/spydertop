@@ -144,9 +144,11 @@ class LoadingFrame(Frame):
             def guard():
                 try:
                     self._model.load_data(
-                        self._model.state.time.timestamp()
-                        if self._model.state.time
-                        else None,
+                        (
+                            self._model.state.time.timestamp()
+                            if self._model.state.time
+                            else None
+                        ),
                         timedelta(minutes=5),
                     )
                 except Exception as exc:  # pylint: disable=broad-except

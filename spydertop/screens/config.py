@@ -446,16 +446,18 @@ Once you have a source configured, you can continue.\
                             "${4}Cluster:",
                             cluster.get("name", "<No Name>"),
                             " ",
-                            pretty_datetime(
-                                datetime.strptime(
-                                    cluster["last_data"],
-                                    "%Y-%m-%dT%H:%M:%SZ",
+                            (
+                                pretty_datetime(
+                                    datetime.strptime(
+                                        cluster["last_data"],
+                                        "%Y-%m-%dT%H:%M:%SZ",
+                                    )
+                                    .replace(tzinfo=timezone.utc)
+                                    .astimezone(tz=get_timezone(self.config.settings))
                                 )
-                                .replace(tzinfo=timezone.utc)
-                                .astimezone(tz=get_timezone(self.config.settings))
-                            )
-                            if "last_data" in cluster
-                            else "",
+                                if "last_data" in cluster
+                                else ""
+                            ),
                             str(
                                 datetime.strptime(
                                     cluster["last_data"],
@@ -860,9 +862,11 @@ see the help page for more information.\
             "${3}Machine:",
             source.get("description", ""),
             " ",
-            pretty_datetime(last_stored_time)
-            if "last_stored_chunk_end_time" in source
-            else "",
+            (
+                pretty_datetime(last_stored_time)
+                if "last_stored_chunk_end_time" in source
+                else ""
+            ),
             str(last_stored_time),
             source.get("uid", ""),
         ]

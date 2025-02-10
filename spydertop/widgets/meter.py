@@ -64,7 +64,9 @@ class Meter(Widget):
     def reset(self):
         pass
 
-    def required_height(self, offset, width): # pyright: ignore [reportIncompatibleMethodOverride]
+    def required_height(
+        self, offset, width
+    ):  # pyright: ignore [reportIncompatibleMethodOverride]
         return 1  # meters are always 1-line
 
     def update(self, frame_no):  # pylint: disable=too-many-locals
@@ -181,7 +183,7 @@ class Meter(Widget):
                     break
 
     @property
-    def value(self): # pyright: ignore [reportIncompatibleMethodOverride]
+    def value(self):  # pyright: ignore [reportIncompatibleMethodOverride]
         """The values of the bar graph."""
         return self._values
 

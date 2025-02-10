@@ -77,7 +77,7 @@ class RecordPool:
         self,
         ids: list[str],
         org_uid: str,
-        retry: bool=True,
+        retry: bool = True,
     ) -> List[Record]:
         """
         Calls the objects service to hydrate the given ids into records
@@ -375,7 +375,11 @@ No more records can be loaded."
             rec_id = str(record["id"])
             if rec_id in group:
                 curr_rec = group[rec_id]
-                if not isinstance(curr_rec["time"], float) or not isinstance(record["time"], float) or curr_rec["time"] > record["time"]:
+                if (
+                    not isinstance(curr_rec["time"], float)
+                    or not isinstance(record["time"], float)
+                    or curr_rec["time"] > record["time"]
+                ):
                     # we already have a record with a newer timestamp
                     continue
             group[rec_id] = record

@@ -38,7 +38,7 @@ class InputModal(Frame):
         on_change: Optional[Callable[[Optional[str]], None]] = None,
         on_submit: Optional[Callable[[str], None]] = None,
         on_death: Optional[Callable[[], None]] = None,
-        widget:Type[Widget]=Text,
+        widget: Type[Widget] = Text,
         **kwargs,
     ) -> None:
         """
@@ -56,10 +56,12 @@ class InputModal(Frame):
         # handle on_change to call with the value
         if on_change:
             self._text_input = widget(
-                on_change=( # pyright: ignore [reportCallIssue]
-                    lambda: on_change(self._text_input.value)
-                    if self._text_input.is_valid
-                    else None
+                on_change=(  # pyright: ignore [reportCallIssue]
+                    lambda: (
+                        on_change(self._text_input.value)
+                        if self._text_input.is_valid
+                        else None
+                    )
                 ),
                 **kwargs,
             )
@@ -88,7 +90,9 @@ class InputModal(Frame):
 
         self.fix()
         if value:
-            self._text_input.value = value # pyright: ignore [reportAttributeAccessIssue]
+            self._text_input.value = (
+                value  # pyright: ignore [reportAttributeAccessIssue]
+            )
 
     def process_event(self, event):
         assert self.scene is not None

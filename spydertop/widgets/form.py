@@ -59,7 +59,7 @@ def value_to_widget(
             validator=validate,
             on_change=lambda: (
                 on_change_wrapper(float(widget.value))
-                if widget.value is not None and validate(widget.value) 
+                if widget.value is not None and validate(widget.value)
                 else None
             ),
         )
@@ -136,7 +136,7 @@ class Form(Layout):
 
     def set_value(self, label: str, value: FormData):
         """Set the value of a form field."""
-        self._widgets[label].value = value # type: ignore
+        self._widgets[label].value = value  # type: ignore
         self._data[label] = value
 
     def _on_change(self, label: str, value: FormData):
