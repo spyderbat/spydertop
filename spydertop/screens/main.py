@@ -556,7 +556,11 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
 
         for record in records.values():
             # exlude records that are not in the selected_machine
-            if "muid" in record and record["muid"] != self._model.selected_machine:
+            if (
+                "muid" in record
+                and self._model.selected_machine is not None
+                and record["muid"] != self._model.selected_machine
+            ):
                 continue
             # determine if the record is visible for this time
             if "valid_from" in record:

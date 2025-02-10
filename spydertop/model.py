@@ -230,11 +230,11 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
             if len(self._record_pool.records["model_machine"]) == 0:
                 log.warn("No machines found in the records")
                 self.selected_machine = None
-            else:
+            elif len(self._record_pool.records["model_machine"]) == 1:
                 self.selected_machine = list(
                     self._record_pool.records["model_machine"].keys()
                 )[0]
-            if len(self._record_pool.records["model_machine"]) > 1:
+            elif len(self._record_pool.records["model_machine"]) > 1:
                 # the user will have to select a machine later
                 self.selected_machine = self.selected_machine or None
 
@@ -425,47 +425,50 @@ not enough information could be loaded.\
     def rebuild_tree(self) -> None:
         """Create a tree structure for the processes, based on the puid and ppuid"""
         processes_w_children = {}
-        processes = self.processes
-
-        # the two main root processes are the kernel and the init process
-        # we will use these as the root of the tree
-        kthreadd = None
-        init = None
-
-        for proc in processes.values():
-            try:
-                if proc["id"] not in processes_w_children:
-                    processes_w_children[proc["id"]] = []
-                if (
-                    proc["ppuid"] is not None
-                    and proc["ppuid"] not in processes_w_children
-                ):
-                    processes_w_children[proc["ppuid"]] = []
-                if proc["ppuid"] is not None:
-                    processes_w_children[proc["ppuid"]].append(proc["id"])
-                if proc["pid"] == 1:
-                    init = str(proc["id"])
-                if proc["pid"] == 2:
-                    kthreadd = str(proc["id"])
-            except KeyError as exc:
-                log.err(f"Process {exc} is missing.")
-                log.traceback(exc)
-                continue
-
+        all_processes = self.processes
+        processes_by_muid = {}
+        for p in all_processes.values():
+            processes_by_muid.setdefault(p.get("muid"), []).append(p)
         self._tree = {}  # type: ignore
 
-        # add the root processes to the tree
-        if kthreadd:
-            self._tree[kthreadd] = AppModel._make_branch(
-                kthreadd, processes_w_children, not self.settings.collapse_tree
-            )
-            # root processes are always enabled
-            self._tree[kthreadd] = (True, self._tree[kthreadd][1])
-        if init:
-            self._tree[init] = AppModel._make_branch(
-                init, processes_w_children, not self.settings.collapse_tree
-            )
-            self._tree[init] = (True, self._tree[init][1])
+        for _, processes in processes_by_muid.items():
+            # the two main root processes are the kernel and the init process
+            # we will use these as the root of the tree
+            kthreadd = None
+            init = None
+
+            for proc in processes:
+                try:
+                    if proc["id"] not in processes_w_children:
+                        processes_w_children[proc["id"]] = []
+                    if (
+                        proc["ppuid"] is not None
+                        and proc["ppuid"] not in processes_w_children
+                    ):
+                        processes_w_children[proc["ppuid"]] = []
+                    if proc["ppuid"] is not None:
+                        processes_w_children[proc["ppuid"]].append(proc["id"])
+                    if proc["pid"] == 1:
+                        init = str(proc["id"])
+                    if proc["pid"] == 2:
+                        kthreadd = str(proc["id"])
+                except KeyError as exc:
+                    log.err(f"Process {exc} is missing.")
+                    log.traceback(exc)
+                    continue
+
+            # add the root processes to the tree
+            if kthreadd:
+                self._tree[kthreadd] = AppModel._make_branch(
+                    kthreadd, processes_w_children, not self.settings.collapse_tree
+                )
+                # root processes are always enabled
+                self._tree[kthreadd] = (True, self._tree[kthreadd][1])
+            if init:
+                self._tree[init] = AppModel._make_branch(
+                    init, processes_w_children, not self.settings.collapse_tree
+                )
+                self._tree[init] = (True, self._tree[init][1])
 
     def recover(self, method="revert") -> None:  # pylint: disable=too-many-branches
         """Recover the state of the model, using the given method.
