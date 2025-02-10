@@ -32,7 +32,7 @@ jobs:
       - 
         name: Run Lint
         run: |
-          pylint spydertop ${{ matrix.python-version == "3.8" && "--disable=unknown-option-value" || "" }}
+          pylint spydertop ${{ matrix.python-version == '3.8' && '--disable=unknown-option-value' || '' }}
       - 
         name: Run Type Check
         uses: jakebailey/pyright-action@v1
