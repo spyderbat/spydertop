@@ -87,7 +87,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
 
     def close(self):
         """Close the model, cleaning up any resources"""
-        if self.thread:
+        if self.thread and self.thread != threading.current_thread():
             self.thread.join()
         self._record_pool.close()
 
@@ -190,7 +190,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
             ):
                 time_to_load = self.timestamp
 
-                if self.thread:
+                if self.thread and self.thread != threading.current_thread():
                     self.thread.join()
 
                 thread = threading.Thread(
@@ -391,12 +391,17 @@ not enough information could be loaded.\
         index = 0 if not previous else -1
         muid = muid or self.selected_machine
         if muid is not None:
-            if not self.tops_valid():
+            if not self.tops_valid(muid):
                 return None
             if muid not in self._tops:
                 return None
             return self._tops[muid][index][key]
-        return sum_element_wise(c_list[index][key] for c_list in self._tops.values())
+        if not self.tops_valid():
+            return None
+        return sum_element_wise(
+            c_list[index][key]
+            for c_list in self._tops.values()
+        )
 
     def get_time_elapsed(self, muid: str) -> float:
         """Get the time elapsed since the last event_top_data record for
@@ -489,10 +494,21 @@ not enough information could be loaded.\
                 index = 1  # make sure there is a previous index
                 new_meminfo = None
                 muid = self.selected_machine or (
-                    list(self._tops.keys())[0] if len(self._tops) > 0 else None
+                    list(self._tops.keys())[0]
+                    if len(self._tops) > 0
+                    else (
+                        next(
+                            iter(
+                                m["id"]
+                                for m in self._record_pool.records[
+                                    "model_machine"
+                                ].values()
+                            )
+                        )
+                    )
                 )
                 if muid is not None:
-                    c_list = self._tops[muid]
+                    c_list = self._tops.get(muid, CursorList("", [], 0))
                     while not new_meminfo and index < len(c_list.data):
                         new_meminfo = c_list.data[index]["memory"]
                         index += 1

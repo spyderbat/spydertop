@@ -79,7 +79,13 @@ class Column:
                 else None
             )
         else:
-            self.value_getter = value_getter or (lambda m, r: value_type(r[str_field]))
+            self.value_getter = value_getter or (
+                lambda m, r: (
+                    value_type(r.get(str_field))
+                    if r is not None and str_field in r
+                    else None
+                )
+            )
         self.value_formatter = value_formatter or (lambda m, r, v: str(v))
 
     def get_value(self, model: AppModel, record: Record) -> Any:
@@ -604,7 +610,7 @@ def get_system(model: AppModel, cont: Record) -> Optional[str]:
 def format_mounts(_m: AppModel, _c: Record, mounts: List[Record]) -> str:
     """Format the mounts for a container."""
     return "\n".join(
-        f"{m['Source']}:{m['Destination']}"
+        f"{m['source']}:{m['Destination']}"
         for m in sorted(mounts, key=lambda m: m["Destination"])
     )
 

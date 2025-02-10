@@ -130,6 +130,10 @@ class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
                 import dateparser  # pylint: disable=import-outside-toplevel
 
                 self.state.time = dateparser.parse(context.time)
+                if self.state.time is not None:
+                    self.state.time = self.state.time.astimezone(
+                        get_timezone(config.settings)
+                    )
                 log.log("parsing time:", context, self.state.time)
 
         if self.args.source is not None:

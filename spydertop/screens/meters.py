@@ -177,7 +177,7 @@ def show_tasks(model: AppModel):
     if processes == 0:
         task_count = "${1,1}Not Available"
     else:
-        task_count = processes - tasks["kernel_threads"]
+        task_count = processes - tasks.get("kernel_threads", 0)
     running = tasks.get("running", 0)
     kthreads = tasks.get("kernel_threads", 0)
     threads = tasks.get("total_threads", 0) - kthreads
