@@ -300,7 +300,7 @@ Defaults to the values set in your spyderbat_api config",
     "--machine",
     "-m",
     type=str,
-    help="The machine ID to pull data from. This should be in the format 'mach:aEdYih-4bia'. \
+    help="The machine ID to pull data from. This should be in the format 'mach:aEdYh-4bia'. \
 Defaults to the values set in your spyderbat_api config",
 )
 @click.option(
