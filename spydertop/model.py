@@ -30,7 +30,7 @@ from spydertop.utils.types import APIError, Record, Tree
 from spydertop.utils.cursorlist import CursorList
 from spydertop.constants import API_LOG_TYPES
 
-DEFAULT_DURATION = timedelta(minutes=5)
+DEFAULT_DURATION = timedelta(minutes=15)
 
 
 class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-methods
@@ -113,7 +113,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
     ) -> None:
         """Load data from the source, either the API or a file, then process it"""
         if before is None:
-            before = timedelta(minutes=5)
+            before = timedelta(minutes=15)
         try:
             if isinstance(self._record_pool.input_, Secret):
                 if timestamp is None or self.state.source_uid is None:
@@ -123,7 +123,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
                     self.state.org_uid,
                     self.state.source_uid,
                     timestamp,
-                    duration or timedelta(minutes=5),
+                    duration or timedelta(minutes=15),
                     before,
                 )
             else:
@@ -195,32 +195,33 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
 
                 thread = threading.Thread(
                     target=lambda: self.load_data(
-                        time_to_load, timedelta(seconds=300), timedelta(seconds=300)
+                        time_to_load, timedelta(seconds=900), timedelta(seconds=900)
                     )
                 )
                 thread.start()
                 self.thread = thread
                 return
 
-            # pre-emptively load more records if we're close to the end
-            if (
-                not self._record_pool.is_loaded(self.timestamp + 120)
-                or not self._record_pool.is_loaded(self.timestamp - 120)
-                and isinstance(self._record_pool.input_, Secret)
-            ):
-                time_to_load = self.timestamp
+            # FIXME: disabling this for now since it blocks the UI; there is no
+            # point in loading pre-emptively if it isn't done in the background
+            # # pre-emptively load more records if we're close to the end
+            # if (
+            #     not self._record_pool.is_loaded(self.timestamp + 300)
+            #     or not self._record_pool.is_loaded(self.timestamp - 300)
+            # ) and isinstance(self._record_pool.input_, Secret):
+            #     time_to_load = self.timestamp
 
-                if self.thread:
-                    self.thread.join()
+            #     if self.thread and self.thread != threading.current_thread():
+            #         self.thread.join()
 
-                thread = threading.Thread(
-                    target=lambda: self.load_data(
-                        time_to_load, timedelta(seconds=300), timedelta(seconds=300)
-                    )
-                )
-                thread.start()
-                self.thread = thread
-                return
+            #     thread = threading.Thread(
+            #         target=lambda: self.load_data(
+            #             time_to_load, timedelta(seconds=900), timedelta(seconds=900)
+            #         )
+            #     )
+            #     thread.start()
+            #     self.thread = thread
+            #     return
 
             # correct the memory information
             self._correct_meminfo()
