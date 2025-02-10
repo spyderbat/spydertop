@@ -29,7 +29,7 @@ class InputModal(Frame):
     _on_submit: Callable[[str], None]
     _on_death: Callable[[], None]
 
-    def __init__(  # pylint: disable=too-many-arguments
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         screen: Screen,
         value=None,
@@ -90,8 +90,8 @@ class InputModal(Frame):
 
         self.fix()
         if value:
-            self._text_input.value = (
-                value  # pyright: ignore [reportAttributeAccessIssue]
+            self._text_input.value = (  # pyright: ignore [reportAttributeAccessIssue]
+                value
             )
 
     def process_event(self, event):
@@ -123,7 +123,7 @@ class InputModal(Frame):
 class NotificationModal(Frame):
     """A modal frame for displaying a notification"""
 
-    def __init__(  # pylint: disable=too-many-arguments
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         screen: Screen,
         text: str,

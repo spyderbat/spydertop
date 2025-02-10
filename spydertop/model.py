@@ -203,7 +203,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
                 self.thread = thread
                 return
 
-            # FIXME: disabling this for now since it blocks the UI; there is no
+            # FIX: disabling this for now since it blocks the UI; there is no
             # point in loading pre-emptively if it isn't done in the background
             # # pre-emptively load more records if we're close to the end
             # if (
@@ -282,7 +282,7 @@ not enough information could be loaded.\
                 log.traceback(exc)
         return self._record_pool.orgs
 
-    def get_sources(  # pylint: disable=too-many-arguments
+    def get_sources(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         org_uid: str,
         page: Optional[int] = None,

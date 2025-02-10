@@ -508,7 +508,7 @@ Once you have a source configured, you can continue.\
         log.debug(self.cache)
         self.build_error("An unexpected error occurred")
 
-    def build_question(  # pylint: disable=too-many-arguments,too-many-locals
+    def build_question(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         self,
         question: str,
         answers: List[List[str]],
@@ -728,8 +728,7 @@ see the help page for more information.\
             if last_seen_time.year >= 2020:
                 last_seen_time = last_seen_time.replace(tzinfo=timezone.utc)
                 last_seen_time_local = last_seen_time.astimezone(time_zone)
-                if last_seen_time_local < default_time:
-                    default_time = last_seen_time_local
+                default_time = min(default_time, last_seen_time_local)
 
                 def last_seen_button_callback():
                     date.value = last_seen_time_local

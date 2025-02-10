@@ -124,7 +124,7 @@ class RecordPool:
         )
         return results
 
-    def _call_search(
+    def _call_search( # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         self,
         schema: str,
         start_time: float,
@@ -158,8 +158,8 @@ class RecordPool:
                 search_obj,
             )
             raise APIError("Searching for records failed")
-        id = search_obj.get("id")
-        if not id:
+        obj_id = search_obj.get("id")
+        if not obj_id:
             raise APIError("Search returned an invalid ID")
         complete = False
         result_ids: List[str] = []
@@ -202,7 +202,7 @@ class RecordPool:
 
         return self._call_objects(result_ids, org_uid)
 
-    def load_api(  # pylint: disable=too-many-arguments
+    def load_api(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         org_uid: str,
         source_uid: str,
@@ -261,7 +261,7 @@ class RecordPool:
         def call_api(schema: str, src_id: str):
             records = self._call_search(
                 **input_data,
-                query=f"*",
+                query="*",
                 muid=src_id,
                 cluster_uid=cluster_uid,
                 schema=schema,
@@ -369,7 +369,7 @@ No more records can be loaded."
         for record in records:
             self.progress += 1 / len(lines) * progress_increase * 0.5
 
-            short_schema = str(record["schema"]).split(":")[0]
+            short_schema = str(record["schema"]).split(":", maxsplit=1)[0]
 
             group = self.records[short_schema]
             rec_id = str(record["id"])
@@ -401,7 +401,7 @@ No more records can be loaded."
         orgs = [org for org in orgs if org.get("uid") != "defend_the_flag"]
         self.orgs = orgs
 
-    def load_sources(  # pylint: disable=too-many-arguments
+    def load_sources(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         org_uid: str,
         page: Optional[int] = None,

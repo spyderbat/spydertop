@@ -289,7 +289,7 @@ class CustomTextWrapper(TextWrapper):
     line to line.
     """
 
-    def __init__(  # pylint: disable=too-many-arguments
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         width: int,
         initial_indent: str = "",

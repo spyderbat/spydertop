@@ -13,7 +13,7 @@ from datetime import timedelta
 import re
 from threading import Thread
 from asciimatics.screen import Screen
-from asciimatics.widgets import Frame, Layout, Label
+from asciimatics.widgets import Frame, Layout
 from asciimatics.exceptions import NextScene
 from asciimatics.event import KeyboardEvent
 from spydertop.model import AppModel

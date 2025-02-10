@@ -60,7 +60,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
     _vertical_offset: int = 0
     _horizontal_offset: int = 0
 
-    def __init__(  # pylint: disable=too-many-arguments
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         state: State,
         settings: Settings,
@@ -170,6 +170,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
 
                     to_paint = str(line)
                     # finally, the line is painted.
+                    # pylint: disable=duplicate-code
                     self._frame.canvas.paint(
                         to_paint + " ",
                         self._x + x_offset,
@@ -264,9 +265,9 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
                 return None
         return event
 
-    def required_height(
+    def required_height(  # pyright: ignore [reportIncompatibleMethodOverride]
         self, offset, width
-    ):  # pyright: ignore [reportIncompatibleMethodOverride]
+    ):
         return Widget.FILL_FRAME
 
     def reset(self):
@@ -400,7 +401,7 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
             # the screen is resizing, so don't do anything
             self._vertical_offset = 0
             return
-        if self._state.selected_row < self._vertical_offset:
+        if self._state.selected_row < self._vertical_offset: # pylint: disable=consider-using-min-builtin
             self._vertical_offset = self._state.selected_row
         if self._state.selected_row >= self._vertical_offset + self._h - 1:
             self._vertical_offset = self._state.selected_row - self._h + 2

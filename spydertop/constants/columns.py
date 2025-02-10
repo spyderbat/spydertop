@@ -12,9 +12,8 @@ the cells inside of the records table.
 The Column class is used to define the columns that are displayed in the table.
 """
 
-from _typeshed import ConvertibleToFloat
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Type, Callable, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Optional, Type, Callable, TYPE_CHECKING, Union, SupportsFloat
 
 import orjson
 
@@ -50,7 +49,7 @@ class Column:
     value_getter: Callable[[AppModel, Record], Any]
     value_formatter: Callable[[AppModel, Record, Any], str]
 
-    def __init__(  # pylint: disable=too-many-arguments
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         name: str,
         max_width: int,
@@ -75,7 +74,7 @@ class Column:
 
             def default_date_getter(m: AppModel, r: Record | None):
                 value = r.get(str_field) if r is not None else None
-                if not isinstance(value, ConvertibleToFloat):
+                if not isinstance(value, SupportsFloat):
                     return None
                 return datetime.fromtimestamp(float(value), timezone.utc).astimezone(
                     get_timezone(m.settings)
@@ -424,8 +423,8 @@ SESSION_COLUMNS = [
         value_getter=lambda m, s: (
             timedelta(seconds=m.timestamp - s["valid_from"])  # type:ignore
             if s["expire_at"] > m.timestamp  # type:ignore
-            else timedelta(seconds=s["expire_at"] - s["valid_from"])
-        ),  # type:ignore
+            else timedelta(seconds=s["expire_at"] - s["valid_from"])  # type:ignore
+        ),
         value_formatter=lambda m, s, x: pretty_time(x.total_seconds()),
     ),
     Column("LEADPID", 7, int, field="pid"),
@@ -458,8 +457,8 @@ CONNECTION_COLUMNS = [
             if "duration" not in c
             or "valid_to" not in c
             or c["valid_to"] > m.timestamp  # type:ignore
-            else timedelta(seconds=c["duration"])
-        ),  # type:ignore
+            else timedelta(seconds=c["duration"])  # type:ignore
+        ),
         value_formatter=lambda m, c, x: pretty_time(x.total_seconds()),
     ),
     Column("TXPACK", 6, int, field="packets_tx", enabled=False),
@@ -486,8 +485,8 @@ CONNECTION_COLUMNS = [
         align=Alignment.RIGHT,
         value_getter=lambda m, c: f'{c["local_ip"]}:{c["local_port"]}',
         value_formatter=lambda m, c, x: pretty_address(
-            c["local_ip"], c["local_port"]
-        ),  # type:ignore
+            c["local_ip"], c["local_port"]  # type:ignore
+        ),
     ),
     Column(
         "DIR",
@@ -539,8 +538,8 @@ FLAG_COLUMNS = [
         timedelta,
         align=Alignment.RIGHT,
         value_getter=lambda m, f: timedelta(
-            seconds=m.timestamp - f["time"]
-        ),  # type:ignore
+            seconds=m.timestamp - f["time"]  # type:ignore
+        ),
         value_formatter=lambda m, f, x: pretty_time(x.total_seconds()),
     ),
     Column(
@@ -604,8 +603,8 @@ LISTENING_SOCKET_COLUMNS = [
         align=Alignment.RIGHT,
         value_getter=lambda m, l: f'{l["local_ip"]}:{l["local_port"]}',
         value_formatter=lambda m, l, x: pretty_address(
-            l["local_ip"], l["local_port"]
-        ),  # type:ignore
+            l["local_ip"], l["local_port"]  # type:ignore
+        ),
     ),
     Column("PUID", 20, str, enabled=False),
     Column("PROCESS", 0, str, field="proc_name"),

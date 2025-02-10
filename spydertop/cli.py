@@ -326,7 +326,7 @@ fetching records from the production Spyderbat API",
 )
 @click.argument("timestamp", type=Timestamp(), required=False)
 @click.pass_context
-def load(  # pylint: disable=too-many-arguments
+def load(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     ctx: click.Context,
     organization: Optional[str],
     machine: Optional[str],
@@ -482,7 +482,7 @@ def get_context(ctx: click.Context, name: Optional[str] = None):
     type=ContextParam(),
 )
 @click.pass_context
-def set_context(  # pylint: disable=too-many-arguments
+def set_context(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     ctx: click.Context,
     secret: Optional[str],
     name: str,
