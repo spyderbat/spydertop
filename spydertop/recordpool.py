@@ -18,6 +18,7 @@ from datetime import timedelta
 import gzip
 import multiprocessing
 from typing import DefaultDict, Dict, List, Optional, TextIO, Union
+import time
 
 import orjson
 import urllib3
@@ -62,13 +63,144 @@ class RecordPool:
         if isinstance(self.input_, Secret) and self._connection_pool is None:
             self._connection_pool = urllib3.PoolManager()
 
-    def __del__(self):
-        self.close()
+    # somehow this is getting called when there is still an active record pool
+    # def __del__(self):
+    #     self.close()
 
     def close(self):
         """Close the record pool"""
-        if not isinstance(self._output, Secret) and self._output is not None:
+        if self._output is not None:
             self._output.close()
+            self._output = None
+
+    def _call_objects(
+        self,
+        ids: list[str],
+        org_uid: str,
+        retry: bool=True,
+    ) -> List[Record]:
+        """
+        Calls the objects service to hydrate the given ids into records
+        """
+        if len(ids) == 0:
+            return []
+        objects_response = self.guard_api_call(
+            method="POST",
+            url=f"/api/v1/org/{org_uid}/objects/",
+            ids=ids,
+        )
+        objects_response = orjson.loads(objects_response)
+        results = objects_response.get("results", [])
+        errors = objects_response.get("err_array", [])
+        to_retry = objects_response.get("retryable", [])
+        if len(errors) > 0:
+            log.warn(f"Failed to fetch these objects: {errors}")
+        if retry and len(to_retry) > 0:
+            results.extend(self._call_objects(to_retry, org_uid, retry=False))
+        return results
+
+    def _call_walk(
+        self,
+        ids: List[str],
+        rules: List[Dict[str, Union[str, int]]],
+        org_uid: str,
+    ) -> List[Record]:
+        """
+        Calls the graph walk API to find all records linked to then
+        given IDs using `rules`
+        """
+        if len(ids) == 0:
+            return []
+        objects_response = self.guard_api_call(
+            method="POST",
+            url=f"/api/v1/org/{org_uid}/objects/walk-graph",
+            ids=ids,
+            rules=rules,
+        )
+        results = list(
+            orjson.loads(line)
+            for line in objects_response.split(b"\n")
+            if len(line) > 0
+        )
+        return results
+
+    def _call_search(
+        self,
+        schema: str,
+        start_time: float,
+        end_time: float,
+        org_uid: str,
+        query: str,
+        muid: str | None = None,
+        cluster_uid: str | None = None,
+    ) -> List[Record]:
+        """
+        Calls the search API, then fetches the full records from objects,
+        using graph walking if necessary to ensure all records requried
+        to make a tree view are loaded.
+        """
+        start_time = int(start_time)
+        end_time = int(end_time)
+        search_result = self.guard_api_call(
+            method="POST",
+            url=f"/api/v1/org/{org_uid}/search",
+            start_time=start_time,
+            end_time=end_time,
+            query=query,
+            schema=schema,
+            muid=muid,
+            cluster_uid=cluster_uid,
+        )
+        search_obj = orjson.loads(search_result)
+        if "error" in search_obj:
+            log.err(
+                f"Error received from search (schema: {schema}, query: {query}):",
+                search_obj,
+            )
+            raise APIError("Searching for records failed")
+        id = search_obj.get("id")
+        if not id:
+            raise APIError("Search returned an invalid ID")
+        complete = False
+        result_ids: List[str] = []
+        token = None
+        while not complete:
+            search_page = self.guard_api_call(
+                method="POST", url=f"/api/v1/org/{org_uid}/search/{id}", token=token
+            )
+            search_page = orjson.loads(search_page)
+            if "status" in search_page:
+                if search_page["status"] == "still running":
+                    time.sleep(1)
+                    continue
+                if "Failed" in search_page["status"]:
+                    log.err("Search failed:", search_page.get("athena error"))
+                    if search_page.get("retry"):
+                        return self._call_search(
+                            schema, start_time, end_time, org_uid, query
+                        )
+                    raise APIError("Searching for records failed")
+                raise APIError("Search returned an unknown status")
+            result_ids.extend(x["id"] for x in search_page.get("results", []))
+            token = search_page.get("token")
+            if not token:
+                complete = True
+        # get records from objects
+        if len(result_ids) == 0:
+            log.debug(
+                f"Received no results from search (schema: {schema}, query: {query}, id: {id})"
+            )
+        if schema == "model_process":
+            # we want to ensure we have the full graph, so we need to walk up the parents list
+            walk_rules: List[Dict[str, Union[str, int]]] = [
+                {
+                    "field": "ppuid",
+                    "object_schema": "model_process",
+                }
+            ]
+            return self._call_walk(result_ids, walk_rules, org_uid)
+
+        return self._call_objects(result_ids, org_uid)
 
     def load_api(  # pylint: disable=too-many-arguments
         self,
@@ -76,7 +208,7 @@ class RecordPool:
         source_uid: str,
         timestamp: float,
         duration: timedelta,
-        before=timedelta(seconds=120),
+        before=timedelta(seconds=300),
     ):
         """Load data from the source, either the API or a file, then process it"""
         log.info(f"Loading data for time: {timestamp} and duration: {duration}")
@@ -102,34 +234,43 @@ class RecordPool:
         )
 
         if source_uid.startswith("clus:"):
+            cluster_uid = source_uid
             # this is a cluster, so we need to get the k8s data
             # and then query each node
-            log.info("Loading cluster data")
-            k8s_data = self.guard_api_call(
-                method="POST",
-                url="/api/v1/source/query/",
-                **input_data,
-                src_uid=f"{source_uid}_base",
-                data_type="k8s",
-            )
-            log.info("Parsing cluster data")
-            self._process_records(k8s_data.split(b"\n"), 0.1, parallel=False)
+            if len(self.records["model_k8s_node"]) == 0:
+                log.info("Loading cluster data")
+                node_data = self._call_search(
+                    **input_data,
+                    query=f"cluster_uid = '{source_uid}'",
+                    schema="model_k8s_node",
+                )
+                log.info("Parsing cluster data")
+                self._process_records(node_data, 0.1, parallel=False)
             log.info("Loading node data")
-            sources = [node["muid"] for node in self.records["model_k8s_node"].values()]
+            sources = [
+                str(node["muid"])
+                for node in self.records["model_k8s_node"].values()
+                if "muid" in node
+            ]
         else:
+            cluster_uid = None
             self.progress = 0.1
             log.info("Loading machine data")
             sources = [source_uid]
 
-        def call_api(data_type: str, src_id: str):
-            ndjson = self.guard_api_call(
-                method="POST",
-                url="/api/v1/source/query/",
+        def call_api(schema: str, src_id: str):
+            records = self._call_search(
                 **input_data,
-                src_uid=src_id,
-                data_type=data_type,
+                query=f"*",
+                muid=src_id,
+                cluster_uid=cluster_uid,
+                schema=schema,
             )
-            return ndjson.split(b"\n")
+            return records
+
+        def fetch_machines(muids: List[str]) -> List[Record]:
+            muids = [m for m in muids if m not in self.records["model_machine"]]
+            return self._call_objects(muids, org_uid)
 
         async def load():
             nonlocal lines
@@ -137,8 +278,16 @@ class RecordPool:
             threads: List[Future] = []  # : List[Future[List[bytes]]]
             with ThreadPoolExecutor() as executor:
                 for source in sources:
-                    for data_type in ["htop", "spydergraph"]:
-                        threads.append(executor.submit(call_api, data_type, source))
+                    for schema in [
+                        "event_top_data",
+                        "model_process",
+                        "model_connection",
+                        "event_redflag",
+                        "model_listening_socket",
+                        "model_container",
+                    ]:
+                        threads.append(executor.submit(call_api, schema, source))
+                threads.append(executor.submit(fetch_machines, sources))
                 for thread in as_completed(threads):
                     self._process_records(
                         thread.result(), 0.9 / len(threads), parallel=False
@@ -181,33 +330,39 @@ No more records can be loaded."
 
     def _process_records(
         self,
-        lines: Union[List[str], List[bytes]],
+        lines: Union[List[str], List[bytes], List[Record]],
         progress_increase: float,
         parallel=True,
     ) -> None:
         """Process the loaded records, parsing them and adding them to the model"""
+        records: List[Record] | None = None
 
         # if lines is binary, convert to text
         if len(lines) > 0 and isinstance(lines[0], bytes):
             str_lines = [line.decode("utf-8") for line in lines]  # type: ignore
+        if len(lines) > 0 and isinstance(lines[0], dict):
+            records = lines  # type: ignore
+            str_lines = []
         else:
             str_lines: List[str] = lines  # type: ignore
-        lines = [line for line in str_lines if len(line.strip()) != 0]
 
-        if len(lines) == 0:
-            log.info("No records to process")
-            self.progress += progress_increase
-            return
+        if records is None:
+            lines = [line for line in str_lines if len(line.strip()) != 0]
 
-        # translate the lines from json to a dict in parallel
+            if len(lines) == 0:
+                log.info("No records to process")
+                self.progress += progress_increase
+                return
 
-        # for some reason, forking seems to break stdin/out in some cases
-        if parallel:
-            multiprocessing.set_start_method("spawn")
-            with multiprocessing.Pool() as pool:
-                records = pool.map(orjson.loads, lines)
-        else:
-            records = [orjson.loads(line) for line in lines]
+            # translate the lines from json to a dict in parallel
+
+            # for some reason, forking seems to break stdin/out in some cases
+            if parallel:
+                multiprocessing.set_start_method("spawn")
+                with multiprocessing.Pool() as pool:
+                    records = pool.map(orjson.loads, lines)
+            else:
+                records = [orjson.loads(line) for line in lines]
 
         self.progress += 0.5 * progress_increase
 
