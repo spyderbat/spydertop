@@ -561,7 +561,9 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             self.needs_recalculate = True
             return
 
-        for record in records.values():
+        needed_ids = set()
+
+        for record_id, record in records.items():
             # exlude records that are not in the selected_machine
             if (
                 "muid" in record
@@ -592,7 +594,26 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
                 and record["type"] == "thread"
             ):
                 continue
+            needed_ids.add(record_id)
 
+        # if we are handling processes as a tree, then we still need closed processes that have children
+        if self._model.settings.tab == "processes" and self._model.settings.tree:
+
+            def add_needed_children(branch):
+                if branch is None:
+                    return False
+                parent_needed = False
+                for rec_id, subbranch in branch[1].items():
+                    needed = add_needed_children(subbranch)
+                    if needed:
+                        needed_ids.add(rec_id)
+                    parent_needed = parent_needed or rec_id in needed_ids
+                return parent_needed
+
+            add_needed_children((None, self._model.tree))
+
+        for rec_id in needed_ids:
+            record = records[rec_id]
             # build the row for options
             cells = []
             sortable_cells = []
