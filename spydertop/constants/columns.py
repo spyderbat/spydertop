@@ -676,15 +676,19 @@ def format_container_status(m: AppModel, _c: Record, state: dict) -> str:
         finished = datetime.fromisoformat(values["finishedAt"])
         since_finished = (m.state.time - finished).total_seconds()
         if since_finished < 0:
-            return f"Up {pretty_time((
-                        m.state.time -
-                        datetime.fromisoformat(values['startedAt'])).total_seconds())}"
+            formatted_time = pretty_time(
+                (
+                    m.state.time - datetime.fromisoformat(values["startedAt"])
+                ).total_seconds()
+            )
+            return f"Up {formatted_time}"
         return f"{values['reason']} {pretty_time(since_finished)} ago"
     if "running" in state:
         values = state["running"]
-        return f"Up {pretty_time((
-                    m.state.time -
-                    datetime.fromisoformat(values['startedAt'])).total_seconds())}"
+        formatted_time = pretty_time(
+            (m.state.time - datetime.fromisoformat(values["startedAt"])).total_seconds()
+        )
+        return f"Up {formatted_time}"
 
     return "?"
 
