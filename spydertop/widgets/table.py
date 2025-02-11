@@ -401,7 +401,9 @@ class Table(Widget):  # pylint: disable=too-many-instance-attributes
             # the screen is resizing, so don't do anything
             self._vertical_offset = 0
             return
-        if self._state.selected_row < self._vertical_offset: # pylint: disable=consider-using-min-builtin
+        if (
+            self._state.selected_row < self._vertical_offset
+        ):  # pylint: disable=consider-using-min-builtin
             self._vertical_offset = self._state.selected_row
         if self._state.selected_row >= self._vertical_offset + self._h - 1:
             self._vertical_offset = self._state.selected_row - self._h + 2

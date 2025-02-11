@@ -13,7 +13,17 @@ The Column class is used to define the columns that are displayed in the table.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Type, Callable, TYPE_CHECKING, Union, SupportsFloat
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Type,
+    Callable,
+    TYPE_CHECKING,
+    Union,
+    SupportsFloat,
+)
 
 import orjson
 

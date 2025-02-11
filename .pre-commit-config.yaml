@@ -12,3 +12,9 @@ repos:
     hooks:
     -   id: trufflehog
         entry: trufflehog git file://. --since-commit HEAD --no-verification --fail
+-   repo: local
+    hooks:
+    -   id: check-black
+        name: Check black
+        entry: ./black.sh
+        language: script

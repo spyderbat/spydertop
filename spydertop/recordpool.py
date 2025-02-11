@@ -124,7 +124,7 @@ class RecordPool:
         )
         return results
 
-    def _call_search( # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    def _call_search(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         self,
         schema: str,
         start_time: float,
