@@ -596,7 +596,8 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
                 continue
             needed_ids.add(record_id)
 
-        # if we are handling processes as a tree, then we still need closed processes that have children
+        # if we are handling processes as a tree, then we
+        # still need closed processes that have children
         if self._model.settings.tab == "processes" and self._model.settings.tree:
 
             def add_needed_children(branch):

@@ -217,6 +217,7 @@ def get_resource_record(
 
 
 def format_flag_counts(_m, _p, count: int) -> str:
+    """Formats flag counts with relative colors"""
     if count == 0:
         return "${8,1}0"
     if count < 5:
@@ -675,11 +676,15 @@ def format_container_status(m: AppModel, _c: Record, state: dict) -> str:
         finished = datetime.fromisoformat(values["finishedAt"])
         since_finished = (m.state.time - finished).total_seconds()
         if since_finished < 0:
-            return f"Up {pretty_time((m.state.time - datetime.fromisoformat(values['startedAt'])).total_seconds())}"
+            return f"Up {pretty_time((
+                        m.state.time -
+                        datetime.fromisoformat(values['startedAt'])).total_seconds())}"
         return f"{values['reason']} {pretty_time(since_finished)} ago"
     if "running" in state:
         values = state["running"]
-        return f"Up {pretty_time((m.state.time - datetime.fromisoformat(values['startedAt'])).total_seconds())}"
+        return f"Up {pretty_time((
+                    m.state.time -
+                    datetime.fromisoformat(values['startedAt'])).total_seconds())}"
 
     return "?"
 

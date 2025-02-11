@@ -127,7 +127,7 @@ See the [Project Structure](https://github.com/spyderbat/spydertop/blob/main/str
 To run the equivalent of the automated GitHub actions checks, run this command:
 
 ```sh
-pyright --pythonversion 3.13 && pyright --pythonversion 3.8 && pylint spydertop
+./black.sh && pyright --pythonversion 3.13 && pyright --pythonversion 3.8 && pylint spydertop
 ```
 
 ## Debugging
