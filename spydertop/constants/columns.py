@@ -216,6 +216,16 @@ def get_resource_record(
     return record
 
 
+def format_flag_counts(_m, _p, count: int) -> str:
+    if count == 0:
+        return "${8,1}0"
+    if count < 5:
+        return f"${{3}}{count}"
+    if count < 15:
+        return f"${{1}}{count}"
+    return f"${{1,1}}{count}"
+
+
 PROCESS_COLUMNS = [
     Column("ID", 30, str, enabled=False),
     Column("NAME", 15, str, enabled=False),
@@ -354,6 +364,15 @@ PROCESS_COLUMNS = [
         align=Alignment.RIGHT,
         value_getter=lambda m, x: timedelta(seconds=m.timestamp - x["valid_from"]),  # type: ignore
         value_formatter=lambda m, r, x: pretty_time(x.total_seconds()),
+        enabled=False,
+    ),
+    Column("FLAGS", 6, int, field="red_flag_count", value_formatter=format_flag_counts),
+    Column(
+        "FLAG_IDS",
+        15,
+        list,
+        field="red_flags",
+        value_formatter=lambda m, c, x: ", ".join(x),
         enabled=False,
     ),
     Column(
@@ -635,7 +654,7 @@ def get_system(model: AppModel, cont: Record) -> Optional[str]:
 def format_mounts(_m: AppModel, _c: Record, mounts: List[Record]) -> str:
     """Format the mounts for a container."""
     return "\n".join(
-        f"{m['source']}:{m['Destination']}"
+        f"{m.get('source', m.get('Source', '[Unknown]'))}:{m['Destination']}"
         for m in sorted(mounts, key=lambda m: m["Destination"])  # type:ignore
     )
 
@@ -647,18 +666,30 @@ def format_networks(_m: AppModel, _c: Record, networks: dict) -> str:
     )
 
 
+def format_container_status(m: AppModel, _c: Record, state: dict) -> str:
+    """Gets a container's status"""
+    if m.state.time is None:
+        return "?"
+    if "terminated" in state:
+        values = state["terminated"]
+        finished = datetime.fromisoformat(values["finishedAt"])
+        since_finished = (m.state.time - finished).total_seconds()
+        if since_finished < 0:
+            return f"Up {pretty_time((m.state.time - datetime.fromisoformat(values['startedAt'])).total_seconds())}"
+        return f"{values['reason']} {pretty_time(since_finished)} ago"
+    if "running" in state:
+        values = state["running"]
+        return f"Up {pretty_time((m.state.time - datetime.fromisoformat(values['startedAt'])).total_seconds())}"
+
+    return "?"
+
+
 CONTAINER_COLUMNS = [
     Column("ID", 42, str, enabled=False),
     Column("CONTAINER_ID", 12, str, field="container_short_id"),
     Column("CONT_ID_FULL", 10, str, field="container_id", enabled=False),
     Column("IMAGE", 40, str),
     Column("IMAGE_ID", 10, str, enabled=False),
-    Column(
-        "COMMAND",
-        25,
-        str,
-        value_formatter=lambda m, c, x: x if x != "/pause" else "${8,1}/pause",
-    ),
     Column(
         "CREATED",
         15,
@@ -670,14 +701,18 @@ CONTAINER_COLUMNS = [
     Column(
         "STATUS",
         15,
-        datetime,
-        value_getter=lambda m, c: map_optional(
-            lambda x: datetime.fromtimestamp(x, timezone.utc).astimezone(
-                get_timezone(m.settings)
-            ),
-            c.get("container_detail_state", {}).get("StartedAt"),  # type:ignore
-        ),
-        value_formatter=lambda m, c, x: f"Up {pretty_time((m.state.time - x).total_seconds())}",
+        dict,
+        field="container_state_k8s",
+        value_formatter=format_container_status,
+    ),
+    Column("FLAGS", 6, int, field="red_flag_count", value_formatter=format_flag_counts),
+    Column(
+        "FLAG_IDS",
+        15,
+        list,
+        field="red_flags",
+        value_formatter=lambda m, c, x: ", ".join(x),
+        enabled=False,
     ),
     Column(
         "PORTS",
@@ -712,5 +747,11 @@ CONTAINER_COLUMNS = [
         value_formatter=lambda m, c, x: x if x != "/pause" else "${8,1}/pause",
         enabled=False,
     ),
-    Column("NAME", 0, str, field="container_name"),
+    Column("NAME", 25, str, field="container_name"),
+    Column(
+        "COMMAND",
+        0,
+        str,
+        value_formatter=lambda m, c, x: x if x != "/pause" else "${8,1}/pause",
+    ),
 ]
