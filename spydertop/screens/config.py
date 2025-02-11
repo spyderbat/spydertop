@@ -134,7 +134,6 @@ class ConfigurationFrame(Frame):  # pylint: disable=too-many-instance-attributes
                     self.state.time = self.state.time.astimezone(
                         get_timezone(config.settings)
                     )
-                log.log("parsing time:", context, self.state.time)
 
         if self.args.source is not None:
             if "*" in self.args.source:
