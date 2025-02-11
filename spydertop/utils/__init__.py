@@ -173,7 +173,7 @@ def sum_element_wise(
     try:
         first = next(iter(group))
     except StopIteration:
-        return type(group)()
+        return None
     if isinstance(first, dict):
         totals = {}
         for values in group:

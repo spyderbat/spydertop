@@ -166,7 +166,7 @@ class RecordPool:
         token = None
         while not complete:
             search_page = self.guard_api_call(
-                method="POST", url=f"/api/v1/org/{org_uid}/search/{id}", token=token
+                method="POST", url=f"/api/v1/org/{org_uid}/search/{obj_id}", token=token
             )
             search_page = orjson.loads(search_page)
             if "status" in search_page:
@@ -188,7 +188,7 @@ class RecordPool:
         # get records from objects
         if len(result_ids) == 0:
             log.debug(
-                f"Received no results from search (schema: {schema}, query: {query}, id: {id})"
+                f"Received no results from search (schema: {schema}, query: {query}, id: {obj_id})"
             )
         if schema == "model_process":
             # we want to ensure we have the full graph, so we need to walk up the parents list

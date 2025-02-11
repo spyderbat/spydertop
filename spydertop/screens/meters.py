@@ -40,7 +40,7 @@ def sum_disks(disks: Dict[str, Dict[str, int]]) -> Dict[str, int]:
         prev_disk_name = disk_name
         filtered_disks[disk_name] = values
 
-    return sum_element_wise(filtered_disks.values())  # type: ignore
+    return sum_element_wise(filtered_disks.values()) or {}  # type: ignore
 
 
 def get_disk_values(model: AppModel, muid: str):
