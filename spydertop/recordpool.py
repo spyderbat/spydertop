@@ -45,7 +45,7 @@ class RecordPool:
     sources: Dict[str, List[dict]] = {}
     clusters: Dict[str, List[dict]] = {}
 
-    _output: Optional[TextIO]
+    _output: Optional[str]
     _time_span_tracker = TimeSpanTracker()
     _connection_pool: Optional[urllib3.PoolManager] = None
 
@@ -55,23 +55,12 @@ class RecordPool:
         output: Optional[TextIO] = None,
     ):
         self.input_ = input_src
-        self._output = output
+        self._output = output.name if output is not None else None
+        if output is not None:
+            output.close()
 
-        # if the output file is gzipped, open it with gzip
-        if self._output and self._output.name.endswith(".gz"):
-            self._output = gzip.open(self._output.name, "wt")
         if isinstance(self.input_, Secret) and self._connection_pool is None:
             self._connection_pool = urllib3.PoolManager()
-
-    # somehow this is getting called when there is still an active record pool
-    # def __del__(self):
-    #     self.close()
-
-    def close(self):
-        """Close the record pool"""
-        if self._output is not None:
-            self._output.close()
-            self._output = None
 
     def _call_objects(
         self,
@@ -302,7 +291,12 @@ class RecordPool:
                 for group in self.records.values()
                 for record in group.values()
             ]
-            self._output.writelines(lines)
+            if self._output.endswith(".gz"):
+                f = gzip.open(self._output, "wt", encoding="utf-8")
+            else:
+                f = open(self._output, "wt", encoding="utf-8")
+            f.writelines(lines)
+            f.close
 
         self.loaded = True
         log.debug("Completed loading records")

@@ -89,7 +89,6 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
         """Close the model, cleaning up any resources"""
         if self.thread and self.thread != threading.current_thread():
             self.thread.join()
-        self._record_pool.close()
 
     def init(self, start_duration: Optional[timedelta]) -> None:
         """Initialize the model, loading data from the source. Requires config to be complete"""

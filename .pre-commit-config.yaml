@@ -8,7 +8,7 @@ repos:
     hooks:
     -   id: spyder-scan
 -   repo: https://github.com/trufflesecurity/trufflehog
-    rev: v3.88.6
+    rev: 3.88.13
     hooks:
     -   id: trufflehog
         entry: trufflehog git file://. --since-commit HEAD --no-verification --fail
