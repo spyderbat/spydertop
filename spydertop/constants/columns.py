@@ -726,9 +726,9 @@ CONTAINER_COLUMNS = [
     Column(
         "PORTS",
         12,
-        list,
+        dict,
         field="port_bindings",
-        value_formatter=lambda m, c, x: ", ".join(x),
+        value_formatter=lambda m, c, x: ", ".join(f"{k}:{v}" for k, v in x.items()),
     ),
     Column(
         "VOLUMES",
