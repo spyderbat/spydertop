@@ -191,7 +191,7 @@ class RecordPool:
 
         return self._call_objects(result_ids, org_uid)
 
-    def load_api(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    def load_api(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         self,
         org_uid: str,
         source_uid: str,
@@ -294,9 +294,11 @@ class RecordPool:
             if self._output.endswith(".gz"):
                 f = gzip.open(self._output, "wt", encoding="utf-8")
             else:
-                f = open(self._output, "wt", encoding="utf-8")
+                f = open(  # pylint: disable=consider-using-with
+                    self._output, "wt", encoding="utf-8"
+                )
             f.writelines(lines)
-            f.close
+            f.close()
 
         self.loaded = True
         log.debug("Completed loading records")
