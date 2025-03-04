@@ -30,7 +30,7 @@ from spydertop.utils.types import APIError, Record, Tree
 from spydertop.utils.cursorlist import CursorList
 from spydertop.constants import API_LOG_TYPES
 
-DEFAULT_DURATION = timedelta(minutes=5)
+DEFAULT_DURATION = timedelta(minutes=15)
 
 
 class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-methods
@@ -87,9 +87,8 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
 
     def close(self):
         """Close the model, cleaning up any resources"""
-        if self.thread:
+        if self.thread and self.thread != threading.current_thread():
             self.thread.join()
-        self._record_pool.close()
 
     def init(self, start_duration: Optional[timedelta]) -> None:
         """Initialize the model, loading data from the source. Requires config to be complete"""
@@ -113,7 +112,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
     ) -> None:
         """Load data from the source, either the API or a file, then process it"""
         if before is None:
-            before = timedelta(minutes=5)
+            before = timedelta(minutes=15)
         try:
             if isinstance(self._record_pool.input_, Secret):
                 if timestamp is None or self.state.source_uid is None:
@@ -123,7 +122,7 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
                     self.state.org_uid,
                     self.state.source_uid,
                     timestamp,
-                    duration or timedelta(minutes=5),
+                    duration or timedelta(minutes=15),
                     before,
                 )
             else:
@@ -146,7 +145,8 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
 
         event_top_data = self._record_pool.records["event_top_data"].values()
         event_top_data = groupby(event_top_data, lambda record: record["muid"])
-        self._tops = {
+        # no idea what is setting it off here
+        self._tops = {  # pyright: ignore [reportAttributeAccessIssue]
             muid: CursorList("time", list(records), self.timestamp)
             for muid, records in event_top_data
         }
@@ -190,37 +190,38 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
             ):
                 time_to_load = self.timestamp
 
-                if self.thread:
+                if self.thread and self.thread != threading.current_thread():
                     self.thread.join()
 
                 thread = threading.Thread(
                     target=lambda: self.load_data(
-                        time_to_load, timedelta(seconds=300), timedelta(seconds=300)
+                        time_to_load, timedelta(seconds=900), timedelta(seconds=900)
                     )
                 )
                 thread.start()
                 self.thread = thread
                 return
 
-            # pre-emptively load more records if we're close to the end
-            if (
-                not self._record_pool.is_loaded(self.timestamp + 120)
-                or not self._record_pool.is_loaded(self.timestamp - 120)
-                and isinstance(self._record_pool.input_, Secret)
-            ):
-                time_to_load = self.timestamp
+            # FIX: disabling this for now since it blocks the UI; there is no
+            # point in loading pre-emptively if it isn't done in the background
+            # # pre-emptively load more records if we're close to the end
+            # if (
+            #     not self._record_pool.is_loaded(self.timestamp + 300)
+            #     or not self._record_pool.is_loaded(self.timestamp - 300)
+            # ) and isinstance(self._record_pool.input_, Secret):
+            #     time_to_load = self.timestamp
 
-                if self.thread:
-                    self.thread.join()
+            #     if self.thread and self.thread != threading.current_thread():
+            #         self.thread.join()
 
-                thread = threading.Thread(
-                    target=lambda: self.load_data(
-                        time_to_load, timedelta(seconds=300), timedelta(seconds=300)
-                    )
-                )
-                thread.start()
-                self.thread = thread
-                return
+            #     thread = threading.Thread(
+            #         target=lambda: self.load_data(
+            #             time_to_load, timedelta(seconds=900), timedelta(seconds=900)
+            #         )
+            #     )
+            #     thread.start()
+            #     self.thread = thread
+            #     return
 
             # correct the memory information
             self._correct_meminfo()
@@ -230,11 +231,11 @@ class AppModel:  # pylint: disable=too-many-instance-attributes,too-many-public-
             if len(self._record_pool.records["model_machine"]) == 0:
                 log.warn("No machines found in the records")
                 self.selected_machine = None
-            else:
+            elif len(self._record_pool.records["model_machine"]) == 1:
                 self.selected_machine = list(
                     self._record_pool.records["model_machine"].keys()
                 )[0]
-            if len(self._record_pool.records["model_machine"]) > 1:
+            elif len(self._record_pool.records["model_machine"]) > 1:
                 # the user will have to select a machine later
                 self.selected_machine = self.selected_machine or None
 
@@ -280,7 +281,7 @@ not enough information could be loaded.\
                 log.traceback(exc)
         return self._record_pool.orgs
 
-    def get_sources(  # pylint: disable=too-many-arguments
+    def get_sources(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         org_uid: str,
         page: Optional[int] = None,
@@ -352,9 +353,9 @@ not enough information could be loaded.\
                     "Content-Type": "application/json",
                 }
                 if isinstance(self._record_pool.input_, Secret):
-                    headers[
-                        "Authorization"
-                    ] = f"Bearer {self._record_pool.input_.api_key}"
+                    headers["Authorization"] = (
+                        f"Bearer {self._record_pool.input_.api_key}"
+                    )
                 # send the data to the API
                 response = self._http_client.request(
                     "POST",
@@ -391,11 +392,13 @@ not enough information could be loaded.\
         index = 0 if not previous else -1
         muid = muid or self.selected_machine
         if muid is not None:
-            if not self.tops_valid():
+            if not self.tops_valid(muid):
                 return None
             if muid not in self._tops:
                 return None
             return self._tops[muid][index][key]
+        if not self.tops_valid():
+            return None
         return sum_element_wise(c_list[index][key] for c_list in self._tops.values())
 
     def get_time_elapsed(self, muid: str) -> float:
@@ -420,47 +423,52 @@ not enough information could be loaded.\
     def rebuild_tree(self) -> None:
         """Create a tree structure for the processes, based on the puid and ppuid"""
         processes_w_children = {}
-        processes = self.processes
-
-        # the two main root processes are the kernel and the init process
-        # we will use these as the root of the tree
-        kthreadd = None
-        init = None
-
-        for proc in processes.values():
-            try:
-                if proc["id"] not in processes_w_children:
-                    processes_w_children[proc["id"]] = []
-                if (
-                    proc["ppuid"] is not None
-                    and proc["ppuid"] not in processes_w_children
-                ):
-                    processes_w_children[proc["ppuid"]] = []
-                if proc["ppuid"] is not None:
-                    processes_w_children[proc["ppuid"]].append(proc["id"])
-                if proc["pid"] == 1:
-                    init = str(proc["id"])
-                if proc["pid"] == 2:
-                    kthreadd = str(proc["id"])
-            except KeyError as exc:
-                log.err(f"Process {exc} is missing.")
-                log.traceback(exc)
-                continue
-
+        all_processes = self.processes
+        processes_by_muid = {}
+        for p in all_processes.values():
+            processes_by_muid.setdefault(p.get("muid"), []).append(p)
         self._tree = {}  # type: ignore
 
-        # add the root processes to the tree
-        if kthreadd:
-            self._tree[kthreadd] = AppModel._make_branch(
-                kthreadd, processes_w_children, not self.settings.collapse_tree
-            )
-            # root processes are always enabled
-            self._tree[kthreadd] = (True, self._tree[kthreadd][1])
-        if init:
-            self._tree[init] = AppModel._make_branch(
-                init, processes_w_children, not self.settings.collapse_tree
-            )
-            self._tree[init] = (True, self._tree[init][1])
+        for _, processes in processes_by_muid.items():
+            # the two main root processes are the kernel and the init process
+            # we will use these as the root of the tree
+            kthreadd = None
+            init = None
+
+            for proc in processes:
+                try:
+                    if proc["id"] not in processes_w_children:
+                        processes_w_children[proc["id"]] = []
+                    if (
+                        proc["ppuid"] is not None
+                        and proc["ppuid"] not in processes_w_children
+                    ):
+                        processes_w_children[proc["ppuid"]] = []
+                    if proc["ppuid"] is not None:
+                        processes_w_children[proc["ppuid"]].append(proc["id"])
+                    if proc["pid"] == 1:
+                        init = str(proc["id"])
+                    if proc["pid"] == 2:
+                        kthreadd = str(proc["id"])
+                except KeyError as exc:
+                    log.err(f"Process {exc} is missing.")
+                    log.traceback(exc)
+                    continue
+
+            # add the root processes to the tree
+            if kthreadd:
+                root = AppModel._make_branch(
+                    kthreadd, processes_w_children, not self.settings.collapse_tree
+                )
+                assert root is not None
+                # root processes are always enabled
+                self._tree[kthreadd] = (True, root[1])
+            if init:
+                root = AppModel._make_branch(
+                    init, processes_w_children, not self.settings.collapse_tree
+                )
+                assert root is not None
+                self._tree[init] = (True, root[1])
 
     def recover(self, method="revert") -> None:  # pylint: disable=too-many-branches
         """Recover the state of the model, using the given method.
@@ -489,10 +497,21 @@ not enough information could be loaded.\
                 index = 1  # make sure there is a previous index
                 new_meminfo = None
                 muid = self.selected_machine or (
-                    list(self._tops.keys())[0] if len(self._tops) > 0 else None
+                    list(self._tops.keys())[0]
+                    if len(self._tops) > 0
+                    else (
+                        next(
+                            iter(
+                                m["id"]
+                                for m in self._record_pool.records[
+                                    "model_machine"
+                                ].values()
+                            )
+                        )
+                    )
                 )
-                if muid is not None:
-                    c_list = self._tops[muid]
+                if muid is not None and isinstance(muid, str):
+                    c_list = self._tops.get(muid, CursorList("", [], 0))
                     while not new_meminfo and index < len(c_list.data):
                         new_meminfo = c_list.data[index]["memory"]
                         index += 1

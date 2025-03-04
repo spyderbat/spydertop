@@ -27,7 +27,7 @@ class Meter(Widget):
 
     total: Optional[float]
 
-    def __init__(  # pylint: disable=too-many-arguments
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         label: str,
         values: Union[List[float], List[int]],
@@ -64,7 +64,9 @@ class Meter(Widget):
     def reset(self):
         pass
 
-    def required_height(self, offset, width):
+    def required_height(  # pyright: ignore [reportIncompatibleMethodOverride]
+        self, offset, width
+    ):
         return 1  # meters are always 1-line
 
     def update(self, frame_no):  # pylint: disable=too-many-locals
@@ -181,7 +183,7 @@ class Meter(Widget):
                     break
 
     @property
-    def value(self):
+    def value(self):  # pyright: ignore [reportIncompatibleMethodOverride]
         """The values of the bar graph."""
         return self._values
 

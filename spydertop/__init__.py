@@ -6,10 +6,10 @@
 #
 
 """
-    Spydertop Historical TOP Tool
+Spydertop Historical TOP Tool
 
-    Provides a way to view the state of a system
-    in the past, utilizing the spyderbat apis.
+Provides a way to view the state of a system
+in the past, utilizing the spyderbat apis.
 """
 
 # see the cli function in cli.py for the entry point

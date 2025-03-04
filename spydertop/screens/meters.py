@@ -40,7 +40,7 @@ def sum_disks(disks: Dict[str, Dict[str, int]]) -> Dict[str, int]:
         prev_disk_name = disk_name
         filtered_disks[disk_name] = values
 
-    return sum_element_wise(filtered_disks.values())  # type: ignore
+    return sum_element_wise(filtered_disks.values()) or {}  # type: ignore
 
 
 def get_disk_values(model: AppModel, muid: str):
@@ -177,7 +177,7 @@ def show_tasks(model: AppModel):
     if processes == 0:
         task_count = "${1,1}Not Available"
     else:
-        task_count = processes - tasks["kernel_threads"]
+        task_count = processes - tasks.get("kernel_threads", 0)
     running = tasks.get("running", 0)
     kthreads = tasks.get("kernel_threads", 0)
     threads = tasks.get("total_threads", 0) - kthreads
@@ -333,9 +333,12 @@ def update_swap(model: AppModel):
 
 def show_uptime(model: AppModel):
     """Generates the string for the uptime meter"""
+    if model.timestamp is None:
+        return ""
     uptime = ", ".join(
         str(timedelta(seconds=model.timestamp - mach["boot_time"]))
         for mach in model.machines.values()
+        if "boot_time" in mach and isinstance(mach["boot_time"], float)
     )
     if len(uptime) == 0:
         return add_palette("  ${{{meter_label}}}Uptime: ${{1,1}}No Data", model)

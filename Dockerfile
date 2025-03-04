@@ -1,4 +1,4 @@
-FROM python:3-alpine as build
+FROM python:3-alpine AS build
 
 RUN apk add --no-cache git
 
@@ -6,6 +6,7 @@ RUN apk add --no-cache git
 # this is necessary to remove the pillow dependency
 # see https://github.com/peterbrittain/asciimatics/issues/95
 WORKDIR /
+RUN pip install setuptools
 RUN git clone https://github.com/peterbrittain/asciimatics.git && \
     cd asciimatics && \
     rm asciimatics/renderers/images.py && \

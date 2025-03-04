@@ -138,9 +138,11 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         )
         header.add_widget(
             FuncLabel(
-                lambda: self._model.get_machine_short_name(self._model.selected_machine)
-                if self._model.selected_machine is not None
-                else ""
+                lambda: (
+                    self._model.get_machine_short_name(self._model.selected_machine)
+                    if self._model.selected_machine is not None
+                    else ""
+                )
             ),
             1,
         )
@@ -156,7 +158,12 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
         for machine_id in machines_to_show:
             machine = self._model.machines.get(machine_id)
             if machine is not None:
-                cpu_count = machine["machine_cores"]
+                cpu_count = (
+                    machine["machine_cores"]
+                    if "machine_cores" in machine
+                    and isinstance(machine["machine_cores"], int)
+                    else 0
+                )
             else:
                 times = self._model.get_value("cpu_time", machine_id)
                 if times is None:
@@ -554,9 +561,15 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
             self.needs_recalculate = True
             return
 
-        for record in records.values():
+        needed_ids = set()
+
+        for record_id, record in records.items():
             # exlude records that are not in the selected_machine
-            if "muid" in record and record["muid"] != self._model.selected_machine:
+            if (
+                "muid" in record
+                and self._model.selected_machine is not None
+                and record["muid"] != self._model.selected_machine
+            ):
                 continue
             # determine if the record is visible for this time
             if "valid_from" in record:
@@ -581,7 +594,27 @@ class MainFrame(Frame):  # pylint: disable=too-many-instance-attributes
                 and record["type"] == "thread"
             ):
                 continue
+            needed_ids.add(record_id)
 
+        # if we are handling processes as a tree, then we
+        # still need closed processes that have children
+        if self._model.settings.tab == "processes" and self._model.settings.tree:
+
+            def add_needed_children(branch):
+                if branch is None:
+                    return False
+                parent_needed = False
+                for rec_id, subbranch in branch[1].items():
+                    needed = add_needed_children(subbranch)
+                    if needed:
+                        needed_ids.add(rec_id)
+                    parent_needed = parent_needed or rec_id in needed_ids
+                return parent_needed
+
+            add_needed_children((None, self._model.tree))
+
+        for rec_id in needed_ids:
+            record = records[rec_id]
             # build the row for options
             cells = []
             sortable_cells = []

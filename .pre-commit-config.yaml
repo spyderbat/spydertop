@@ -1,0 +1,22 @@
+repos:
+-   repo: local
+    hooks:
+      - id: check-black
+        name: Check black
+        entry: black
+        language: system
+        files: '.*\.py$'
+-   repo: https://github.com/spyderbat/spyder-scan
+    rev: v1.1.1
+    hooks:
+      - id: spyder-scan
+        pass_filenames: false
+-   repo: local
+    hooks:
+      - id: trufflehog
+        name: TruffleHog
+        description: Detect secrets in your data.
+        entry: bash -c 'docker run -v "$(pwd):/workdir" ghcr.io/trufflesecurity/trufflehog:latest --no-verification git file:///workdir --debug --fail --since-commit HEAD'               
+        language: system
+        stages: ["pre-commit", "pre-push"]
+        pass_filenames: false

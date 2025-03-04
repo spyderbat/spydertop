@@ -13,7 +13,7 @@ from datetime import timedelta
 import re
 from threading import Thread
 from asciimatics.screen import Screen
-from asciimatics.widgets import Frame, Layout, Label
+from asciimatics.widgets import Frame, Layout
 from asciimatics.exceptions import NextScene
 from asciimatics.event import KeyboardEvent
 from spydertop.model import AppModel
@@ -63,7 +63,7 @@ class LoadingFrame(Frame):
     data and processing records."""
 
     _model: AppModel
-    _label: Label
+    _label: FuncLabel
 
     def __init__(self, screen: Screen, model: AppModel) -> None:
         # pylint: disable=duplicate-code
@@ -144,9 +144,11 @@ class LoadingFrame(Frame):
             def guard():
                 try:
                     self._model.load_data(
-                        self._model.state.time.timestamp()
-                        if self._model.state.time
-                        else None,
+                        (
+                            self._model.state.time.timestamp()
+                            if self._model.state.time
+                            else None
+                        ),
                         timedelta(minutes=5),
                     )
                 except Exception as exc:  # pylint: disable=broad-except

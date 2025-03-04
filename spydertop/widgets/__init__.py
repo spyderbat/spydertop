@@ -39,7 +39,9 @@ class Padding(Widget):
     def reset(self):
         pass
 
-    def required_height(self, offset, width):
+    def required_height(  # pyright: ignore [reportIncompatibleMethodOverride]
+        self, offset, width
+    ):
         return self._height
 
     def update(self, frame_no):
@@ -81,7 +83,7 @@ class FuncLabel(Widget):
         color="label",
         indent="",
         **kwargs,
-    ):  # pylint: disable=too-many-arguments
+    ):  # pylint: disable=too-many-arguments,too-many-positional-arguments
         """
         :param generator: a function which generates the text to display on screen.
             This function is assumed to have no side effects, and can be run often
@@ -104,7 +106,9 @@ class FuncLabel(Widget):
     def reset(self):
         pass
 
-    def required_height(self, offset, width):
+    def required_height(  # pyright: ignore [reportIncompatibleMethodOverride]
+        self, offset, width
+    ):
         text = self.generator()
         height = 0
         wrapper = CustomTextWrapper(
@@ -137,9 +141,11 @@ class FuncLabel(Widget):
                 left_space = (
                     0
                     if self.align == Alignment.LEFT
-                    else extra_space // 2
-                    if self.align == Alignment.CENTER
-                    else extra_space
+                    else (
+                        extra_space // 2
+                        if self.align == Alignment.CENTER
+                        else extra_space
+                    )
                 )
                 spaces = " " * left_space
                 line = f"{spaces}{line}"
@@ -149,6 +155,7 @@ class FuncLabel(Widget):
                     line = ColouredText(line, self.parser)
 
                 # finally, the text is drawn
+                # pylint disable=duplicate-code
                 self._frame.canvas.paint(
                     line,
                     self._x,
@@ -156,13 +163,15 @@ class FuncLabel(Widget):
                     color,
                     attr,
                     background,
-                    colour_map=line.colour_map  # type: ignore
-                    if hasattr(line, "colour_map")
-                    else None,
+                    colour_map=(
+                        line.colour_map  # type: ignore
+                        if hasattr(line, "colour_map")
+                        else None
+                    ),
                 )
                 offset += 1
 
     @property
-    def value(self):
+    def value(self):  # pyright: ignore [reportIncompatibleMethodOverride]
         """The text of the label."""
         return self.generator()
